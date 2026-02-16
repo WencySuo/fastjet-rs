@@ -11,6 +11,10 @@ pub struct PseudoJet {
     _kt2: f64, // _cluster_hist_index, _user_index (no clue what these are for yet)
 }
 
+
+
+// briefjet seems to be just the minimum amount of values from PseudoJet (aka without 3 mom) with NN information 
+
 #[allow(non_snake_case)]
 impl PseudoJet {
     pub const PSEUDOJET_INVALID_PHI: f64 = -100.0;
