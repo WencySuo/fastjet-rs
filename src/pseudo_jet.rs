@@ -209,6 +209,19 @@ impl ops::Add<PseudoJet> for PseudoJet {
     }
 }
 
+impl ops::Add<&PseudoJet> for &PseudoJet {
+    type Output = PseudoJet;
+
+    fn add(self, other: &PseudoJet) -> PseudoJet {
+        PseudoJet::new(
+            self._px + other._px,
+            self._py + other._py,
+            self._pz + other._pz,
+            self._E + other._E,
+        )
+    }
+}
+
 // Summing a jet into this jet
 impl ops::AddAssign<PseudoJet> for PseudoJet {
 fn add_assign(&mut self, other: PseudoJet) -> () {
