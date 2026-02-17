@@ -12,12 +12,20 @@ pub struct ClusterSequence {
     _invr2: f64,
     r2: f64,
     _history: Vec<HistoryElement>,
+    init_n: usize,
 }
 
 pub struct JetDefinition {
     pub algorithm: Algorithm,
     pub r: f64,
     pub scheme: RecombinationScheme,
+    pub strategy: Strategy,
+}
+
+pub enum Strategy {
+    Best,
+    N2Plain,
+    N2Tiling,
 }
 
 // TODO: implement other algorithms
@@ -31,22 +39,37 @@ pub enum RecombinationScheme {
     PTScheme,
 }
 
+use RecombinationScheme::*;
+
+
 impl JetDefinition {
-    pub fn new(algorithm: Algorithm, r: f64, scheme: RecombinationScheme) -> Self {
+    pub fn new(algorithm: Algorithm, r: f64, scheme: RecombinationScheme, strategy: Strategy) -> Self {
         JetDefinition {
             algorithm,
             r,
             scheme,
+            strategy,
         }
     }
 
     //TODO: should add reset function to make it faster
     pub fn recombine(&self, jet_a: &PseudoJet, jet_b: &PseudoJet) -> PseudoJet {
         match self.scheme {
-            RecombinationScheme::EScheme => {
+            EScheme => {
                 let jet_ab = jet_b + jet_a; //keeps mem in jet_b
                 jet_ab
             }
+            _ => {
+                panic!("scheme not yet supported")
+            }
+        }
+    }
+    
+    //TODO: acc add different preprocess for Other recombine algorithms
+    pub fn preprocess(&self, jet_a: &mut PseudoJet) {
+        //E-scheme does not need any preprocessing
+        match self.scheme {
+            EScheme => {},
             _ => {
                 panic!("scheme not yet supported")
             }
@@ -63,7 +86,7 @@ pub enum JetErrors {
     InexistentParent = usize::MAX - 2,
 }
 
-struct HistoryElement {
+pub struct HistoryElement {
     parent1: usize,
     parent2: usize,
     child: usize,
@@ -73,18 +96,113 @@ struct HistoryElement {
 }
 
 impl ClusterSequence {
+    // -----------CONSTRUCTOR--------------
     //TODO: verify if this is right place for constant
-    pub fn new(particles: Vec<PseudoJet>, jetdef: JetDefinition) -> Self {
+    pub fn new(mut particles: Vec<PseudoJet>, jetdef: JetDefinition) -> Self {
         let r2 = jetdef.r * jetdef.r;
         let _invr2 = 1.0 / r2;
-        ClusterSequence {
+        //recomb will produce 2x particles len in max case
+        let _history: Vec<HistoryElement> = Vec::with_capacity(particles.len() * 2);
+        let init_n = particles.len();
+        particles.reserve(particles.len());
+        // filling init history requires 
+        let mut clust_seq = ClusterSequence {
             particles,
             jetdef,
             _invr2,
             r2,
-            _history: Vec::new(),
+            _history,
+            init_n
+        };
+        
+        clust_seq.fill_init_history();
+        
+        clust_seq
+    }
+    
+    #[inline]
+    fn n_particles(&self) -> usize {
+        self.init_n
+    }
+    //TODO: check if _decant (which is transfering jet_def and other info)
+    // into clust_seq internal variables is acc necessary? some pointer wizardry goin on there
+    pub fn initialize_and_run_no_decant(&mut self) {
+        
+        //event is empty so exit
+        if self.n_particles() == 0 {
+            return;
+        }
+        
+        //TODO: when implementing other strategies have to handle here
+        // since we only implemented kt and N2 this func is pretty naive
+        
+        match self.jetdef.strategy {
+            Strategy::Best => {
+                //TODO: implement best strategy
+            }
+            Strategy::N2Plain => {
+                self.simple_n2_cluster();
+            }
+            Strategy::N2Tiling => {
+                //TODO: implement N2Tiling strategy
+            }
+            _ => {
+                panic!("Unsupported strategy");
+            }
+        }
+        
+    }
+    
+    fn fill_init_history(&mut self) {
+        //get total energy of the event
+        let mut tot_e = 0.0;
+        //map for all _jets
+        self.particles.iter_mut().enumerate().for_each(|(i, jet)| {
+            self._history.push(HistoryElement {
+                parent1: JetErrors::InexistentParent as usize,
+                parent2: JetErrors::InexistentParent as usize,
+                child: JetErrors::Invalid as usize,
+                jet_index: i,
+                d_ij: 0.0,
+                curr_max_d_ij: 0.0,
+            });
+            
+            self.jetdef.preprocess(jet);
+            jet.set_cluster_hist_index(i);
+            
+            tot_e += jet.e();
+        });
+        self.init_n = self.particles.len();
+    }
+    
+    // -----------GETTERS--------------
+    pub fn history(&self) -> &Vec<HistoryElement> {
+        &self._history
+    }
+    
+    
+    pub fn inclusive_jets(&self, pmin: f64) -> Vec<PseudoJet> {
+        let dcut = pmin * pmin; 
+        
+        match self.jetdef.algorithm {
+            Algorithm::AntiKt => {
+                // loop through history in reverse 
+                let jets = self._history.iter().rev().filter_map(|hist_elem| {
+                    if hist_elem.curr_max_d_ij < dcut {
+                        None
+                    } else if hist_elem.parent1 == (JetErrors::BeamJet as usize) && hist_elem.d_ij >=dcut{
+                        Some(self.particles[self._history[hist_elem.parent1].jet_index])
+                    } else {
+                        None
+                    }
+                }).collect();
+                
+                jets 
+            },
+            _ => panic!("Unsupported algorithm"),
         }
     }
+    
 
     // main driver loop
     pub fn simple_n2_cluster(&mut self) {
@@ -100,7 +218,7 @@ impl ClusterSequence {
                 phi: jet.phi(),
                 kt2: jet.kt2(), //TODO: implement jet_scale_for_algorithm
                 _jets_index: i,
-                nn_dist: self.jetdef.r * self.jetdef.r,
+                nn_dist: self.r2,
                 nn_jet_index: None,
             };
             bj_jets.push(bj);
@@ -366,7 +484,7 @@ impl ClusterSequence {
         tail_idx: usize,
         jets: &'a mut [J],
     ) -> () {
-        let mut nn_dist = self.jetdef.r * self.jetdef.r;
+        let mut nn_dist = self.r2;
         let mut nn: Option<usize> = None;
 
         // basically splitting for loop into two parts
@@ -399,7 +517,7 @@ impl ClusterSequence {
     }
     #[inline]
     fn bj_set_nn_crosscheck<'b, 'a, J: ProxyJet>(&'b self, jets: &'a mut [J]) -> () {
-        let mut nn_dist = self.jetdef.r * self.jetdef.r;
+        let mut nn_dist = self.r2;
         let mut nn: Option<usize> = None; //ENTIRE scope
         let n = jets.len();
         for i in 0..n {

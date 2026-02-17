@@ -2,6 +2,7 @@ use std::ops;
 use crate::cluster_sequence::JetErrors;
 
 #[allow(non_snake_case)]
+#[derive(Clone, Copy)]
 pub struct PseudoJet {
     _px: f64,
     _py: f64,
@@ -191,7 +192,48 @@ impl PseudoJet {
         self._phi = Self::PSEUDOJET_INVALID_PHI;
         self._rap = Self::PSEUDOJET_INVALID_RAP;
     }
+    
+    // TODO: investigate if we need custom sorting implementation for performance reasons
+    pub fn sorted_by_pt<'a>(jets: &'a mut Vec<PseudoJet>) -> &'a Vec<PseudoJet> {
+        jets.sort_by(|a, b| (-a.kt2()).total_cmp(&(-b.kt2()))); 
+        jets
+    }
 }
+
+// TODO: investigate if we ever need to compare raw PseudoJet objs as a whole and not just sort by fields
+// impl Ord for PseudoJet {
+//     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+//         self._px.total_cmp(&other._px)
+//             .then(self._py.total_cmp(&other._py))
+//             .then(self._pz.total_cmp(&other._pz))
+//             .then(self._E.total_cmp(&other._E))
+//             .then(self._kt2.total_cmp(&other._kt2))
+//             .then(self._rap.total_cmp(&other._rap))
+//             .then(self._phi.total_cmp(&other._phi))
+//             .then(self._cluster_hist_index.cmp(&other._cluster_hist_index))
+//     }
+// }
+
+// impl PartialOrd for PseudoJet {
+//     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+//         Some(self.cmp(other))
+//     }
+// }
+
+// impl Eq for PseudoJet {}
+
+// impl PartialEq for PseudoJet {
+//     fn eq(&self, other: &Self) -> bool {
+//         self._px == other._px 
+//         && self._py == other._py 
+//         && self._pz == other._pz 
+//         && self._E == other._E
+//         && self._rap == other._rap
+//         && self._phi == other._phi
+//         && self._kt2 == other._kt2
+//         && self._cluster_hist_index == other._cluster_hist_index
+//     }
+// }
 
 impl ops::Index<usize> for PseudoJet {
     type Output = f64;
