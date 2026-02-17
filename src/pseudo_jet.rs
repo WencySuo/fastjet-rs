@@ -1,4 +1,5 @@
 use std::ops;
+use crate::cluster_sequence::JetErrors;
 
 #[allow(non_snake_case)]
 pub struct PseudoJet {
@@ -9,6 +10,7 @@ pub struct PseudoJet {
     _rap: f64,
     _phi: f64,
     _kt2: f64, // _cluster_hist_index, _user_index (no clue what these are for yet)
+    _cluster_hist_index: usize,
 }
 
 
@@ -29,6 +31,7 @@ impl PseudoJet {
             _kt2: (px * px + py * py),
             _phi: Self::PSEUDOJET_INVALID_PHI,
             _rap: Self::PSEUDOJET_INVALID_RAP,
+            _cluster_hist_index: JetErrors::Invalid as usize,
         }
     }
 
@@ -173,6 +176,14 @@ impl PseudoJet {
     #[inline]
     pub fn theta(&self) -> f64 {
         return self.cos_theta().acos();
+    }
+    
+    pub fn set_cluster_hist_index(&mut self, index: usize) {
+        self._cluster_hist_index = index;
+    }
+    
+    pub fn cluster_hist_index(&self) -> usize {
+        self._cluster_hist_index
     }
 
     fn finish_init(&mut self) {

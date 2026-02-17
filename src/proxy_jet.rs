@@ -1,6 +1,4 @@
-use crate::pseudo_jet::PseudoJet;
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct BriefJet {
     pub eta: f64,
     pub phi: f64,
