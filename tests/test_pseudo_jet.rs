@@ -11,7 +11,7 @@ mod tests {
 
         #[test]
         fn accessors_return_expected_components() {
-            let jet = PseudoJet::new(3.0, 4.0, 12.0, 15.0);
+            let mut jet = PseudoJet::new(3.0, 4.0, 12.0, 15.0);
             assert_eq!(jet.E(), 15.0);
             assert_eq!(jet.e(), 15.0);
             assert_eq!(jet.px(), 3.0);
@@ -80,7 +80,7 @@ mod tests {
         fn add_returns_componentwise_sum() {
             let a = PseudoJet::new(1.0, 2.0, 3.0, 4.0);
             let b = PseudoJet::new(0.5, 1.5, 2.5, 3.5);
-            let c = a + b;
+            let mut c = a + b;
             assert_eq!(c.px(), 1.5);
             assert_eq!(c.py(), 3.5);
             assert_eq!(c.pz(), 5.5);
@@ -108,7 +108,7 @@ mod tests {
         fn sub_returns_componentwise_difference() {
             let a = PseudoJet::new(1.0, 2.0, 3.0, 4.0);
             let b = PseudoJet::new(0.5, 1.5, 2.5, 3.5);
-            let c = a - b;
+            let mut c = a - b;
             assert_eq!(c.px(), 0.5);
             assert_eq!(c.py(), 0.5);
             assert_eq!(c.pz(), 0.5);
@@ -134,8 +134,8 @@ mod tests {
 
         #[test]
         fn mul_scales_four_momentum_and_cached_kt2() {
-            let jet:PseudoJet = PseudoJet::new(1.0, 2.0, 3.0, 4.0);
-            let out:PseudoJet = jet * 3.0;
+            let jet: PseudoJet = PseudoJet::new(1.0, 2.0, 3.0, 4.0);
+            let mut out: PseudoJet = jet * 3.0;
             assert_eq!(out.px(), 3.0);
             assert_eq!(out.py(), 6.0);
             assert_eq!(out.pz(), 9.0);
@@ -215,5 +215,4 @@ mod tests {
             let _ = jet == 1.0;
         }
     }
-
 }

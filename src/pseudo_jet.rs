@@ -1,5 +1,6 @@
-use std::ops;
 use crate::cluster_sequence::JetErrors;
+use crate::constants::PI;
+use std::ops;
 
 #[allow(non_snake_case)]
 #[derive(Clone, Copy)]
@@ -14,9 +15,7 @@ pub struct PseudoJet {
     _cluster_hist_index: usize,
 }
 
-
-
-// briefjet seems to be just the minimum amount of values from PseudoJet (aka without 3 mom) with NN information 
+// briefjet seems to be just the minimum amount of values from PseudoJet (aka without 3 mom) with NN information
 
 #[allow(non_snake_case)]
 impl PseudoJet {
@@ -62,13 +61,55 @@ impl PseudoJet {
     }
 
     #[inline]
-    pub fn rap(& self) -> f64 {
+    pub fn rap(&mut self) -> f64 {
+        match self._rap {
+            Self::PSEUDOJET_INVALID_RAP => self._set_rap_phi(),
+            _ => {}
+        };
         self._rap
     }
 
     #[inline]
-    pub fn phi(& self) -> f64 {
+    pub fn phi(&mut self) -> f64 {
+        match self._phi {
+            Self::PSEUDOJET_INVALID_PHI => self._set_rap_phi(),
+            _ => {}
+        };
         self._phi
+    }
+
+    #[inline]
+    pub fn _set_rap_phi(&mut self) {
+        let max_rap: f64 = 1e5;
+        if self.kt2() == 0.0 {
+            self._phi = 0.0;
+        } else {
+            self._phi = self.py().atan2(self.px())
+        }
+
+        if self._phi < 0.0 {
+            self._phi += 2.0 * PI;
+        }
+
+        if self._phi >= 2.0 * PI {
+            self._phi -= 2.0 * PI;
+        }
+
+        if self.e() == self.pz().abs() && self.kt2() == 0.0 {
+            let max_rap_here = max_rap + self.pz().abs();
+            if self.pz() > 0.0 {
+                self._rap = max_rap_here;
+            } else {
+                self._rap = -max_rap_here;
+            }
+        } else {
+            let effective_m2 = self.m2().max(0.0);
+            let e_plus_pz = self.e() + self.pz().abs();
+            self._rap = 0.5 * ((self.kt2() + effective_m2) / (e_plus_pz * e_plus_pz)).ln();
+            if self.pz() > 0.0 {
+                self._rap = -self._rap;
+            }
+        }
     }
 
     #[inline]
@@ -154,7 +195,7 @@ impl PseudoJet {
     pub fn et(&self) -> f64 {
         match self.kt2() {
             0.0 => 0.0,
-            _ => self._E / (1.0 + self._pz * self._pz / self.kt2()).sqrt()
+            _ => self._E / (1.0 + self._pz * self._pz / self.kt2()).sqrt(),
         }
     }
     /// return the transverse energy squared
@@ -162,7 +203,7 @@ impl PseudoJet {
     pub fn et2(&self) -> f64 {
         match self.kt2() {
             0.0 => 0.0,
-            _ => self._E * self._E / (1.0 + self._pz * self._pz / self.kt2())
+            _ => self._E * self._E / (1.0 + self._pz * self._pz / self.kt2()),
         }
     }
 
@@ -178,11 +219,11 @@ impl PseudoJet {
     pub fn theta(&self) -> f64 {
         return self.cos_theta().acos();
     }
-    
+
     pub fn set_cluster_hist_index(&mut self, index: usize) {
         self._cluster_hist_index = index;
     }
-    
+
     pub fn cluster_hist_index(&self) -> usize {
         self._cluster_hist_index
     }
@@ -192,10 +233,10 @@ impl PseudoJet {
         self._phi = Self::PSEUDOJET_INVALID_PHI;
         self._rap = Self::PSEUDOJET_INVALID_RAP;
     }
-    
+
     // TODO: investigate if we need custom sorting implementation for performance reasons
-    pub fn sorted_by_pt<'a>(jets: &'a mut Vec<PseudoJet>) -> &'a Vec<PseudoJet> {
-        jets.sort_by(|a, b| (-a.kt2()).total_cmp(&(-b.kt2()))); 
+    pub fn sorted_by_pt<'a>(jets: &'a mut Vec<PseudoJet>) -> &'a mut Vec<PseudoJet> {
+        jets.sort_by(|a, b| (-a.kt2()).total_cmp(&(-b.kt2())));
         jets
     }
 }
@@ -224,9 +265,9 @@ impl PseudoJet {
 
 // impl PartialEq for PseudoJet {
 //     fn eq(&self, other: &Self) -> bool {
-//         self._px == other._px 
-//         && self._py == other._py 
-//         && self._pz == other._pz 
+//         self._px == other._px
+//         && self._py == other._py
+//         && self._pz == other._pz
 //         && self._E == other._E
 //         && self._rap == other._rap
 //         && self._phi == other._phi
@@ -277,7 +318,7 @@ impl ops::Add<&PseudoJet> for &PseudoJet {
 
 // Summing a jet into this jet
 impl ops::AddAssign<PseudoJet> for PseudoJet {
-fn add_assign(&mut self, other: PseudoJet) -> () {
+    fn add_assign(&mut self, other: PseudoJet) -> () {
         self._px += other._px;
         self._py += other._py;
         self._pz += other._pz;
@@ -295,7 +336,7 @@ impl ops::Sub<PseudoJet> for PseudoJet {
             self._px - other._px,
             self._py - other._py,
             self._pz - other._pz,
-            self._E - other._E
+            self._E - other._E,
         )
     }
 }

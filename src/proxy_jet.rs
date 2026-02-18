@@ -21,16 +21,17 @@ pub struct BriefJet {
 pub struct TiledJet<> {}
 
 impl BriefJet {
-    fn new(eta: f64, phi: f64, kt2: f64, _r2: f64) -> Self {
-        BriefJet {
-            eta,
-            phi,
-            kt2,
-            nn_dist: _r2,
-            nn_jet_index: None,
-            _jets_index: 0,
-        }
-    }
+    // TODO: removed since not used yet
+    // fn new(eta: f64, phi: f64, kt2: f64, _r2: f64) -> Self {
+    //     BriefJet {
+    //         eta,
+    //         phi,
+    //         kt2,
+    //         nn_dist: _r2,
+    //         nn_jet_index: None,
+    //         _jets_index: 0,
+    //     }
+    // }
 
     // fn get_jet_type(&self, jet_type: JetType) -> &BriefJet {
     //     match jet_type {
@@ -39,10 +40,11 @@ impl BriefJet {
     //     }
     // }
 
-    //TODO: check if mut is necessary
-    fn nn_jet<'a>(&self, jets: &'a mut[BriefJet]) -> Option<&'a mut BriefJet> {
-        self.nn_jet_index.map(|index| &mut jets[index])
-    }
+    // TODO: removed since not used yet
+    // //TODO: check if mut is necessary
+    // fn nn_jet<'a>(&self, jets: &'a mut[BriefJet]) -> Option<&'a mut BriefJet> {
+    //     self.nn_jet_index.map(|index| &mut jets[index])
+    // }
 }
 
 //for this trait include all generics
@@ -76,7 +78,7 @@ pub trait ProxyJet {
         }
     }
 
-    fn create_jet_type<'a>(&'a self) -> JetType;
+    fn create_jet_type(&'_ self) -> JetType<'_>;
 
 
     //TODO: how to call different types of jet types
@@ -96,7 +98,7 @@ pub trait ProxyJet {
     //
 }
 
-enum JetType<'a> {
+pub enum JetType<'a> {
     BriefJetType(&'a BriefJet),
     TiledJetType( TiledJet),
 }
@@ -123,7 +125,7 @@ impl ProxyJet for BriefJet {
         self.nn_dist
     }
 
-    fn create_jet_type(&self) -> JetType{
+    fn create_jet_type(&'_ self) -> JetType<'_>{
         JetType::BriefJetType(self)
     }
 
