@@ -1,3 +1,4 @@
 /target
 /examples/debug
 /examples/.rustc_info.json
+/.zed

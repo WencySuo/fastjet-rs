@@ -34,8 +34,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         input_particles.push(PseudoJet::new(px, py, pz, e));
     }
 
-    println!("Input Particles size {}", input_particles.len());
-
     //TODO: more default constructors
 
     //create jet def
@@ -53,16 +51,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let pmin = 5.0;
 
-    println!("Particles size {}", clust_seq.particles.len());
+    let mut inclusive_jets: Vec<PseudoJet> = clust_seq.inclusive_jets(pmin);
 
-    let mut inclusive_jets: Vec<PseudoJet> = clust_seq.inclusive_jets(0.0);
-
-    println!("Inclusive Jets size {}", inclusive_jets.len());
     let inclusive_jets: &mut Vec<PseudoJet> = PseudoJet::sorted_by_pt(&mut inclusive_jets);
 
     println!(
         "{:>5} {:>15} {:>15} {:>15}\n",
-        "jet #", "rapidity", "phi", "pt"
+        "jet #", "rapiddity", "phi", "pt"
     );
 
     for (i, jet) in inclusive_jets.iter_mut().enumerate() {

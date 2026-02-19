@@ -1,3 +1,4 @@
+use std::panic;
 use std::usize;
 
 use crate::constants::PI;
@@ -32,6 +33,7 @@ pub enum Strategy {
 // TODO: implement other algorithms
 pub enum Algorithm {
     AntiKt,
+    Kt,
     Cambridge,
 }
 
@@ -186,7 +188,7 @@ impl ClusterSequence {
     pub fn inclusive_jets(&self, pmin: f64) -> Vec<PseudoJet> {
         let dcut = pmin * pmin;
         match self.jetdef.algorithm {
-            Algorithm::AntiKt => {
+            Algorithm::Kt => {
                 // loop through history in reverse
                 let jets = self
                     ._history
@@ -194,10 +196,6 @@ impl ClusterSequence {
                     .rev()
                     .take_while(|hist_elem| hist_elem.curr_max_d_ij >= dcut)
                     .filter_map(|hist_elem| {
-                        // println!(
-                        //     "History element: {}, {}",
-                        //     hist_elem.parent1, hist_elem.parent2
-                        // );
                         if hist_elem.parent2 == (JetErrors::BeamJet as usize)
                             && hist_elem.d_ij >= dcut
                         {
@@ -209,6 +207,20 @@ impl ClusterSequence {
                     .collect();
                 jets
             }
+            Algorithm::AntiKt => self
+                ._history
+                .iter()
+                .rev()
+                .filter_map(|hist_elem| {
+                    if hist_elem.parent2 == (JetErrors::BeamJet as usize) {
+                        let parent1 = hist_elem.parent1;
+                        let jet = self.particles[self._history[parent1].jet_index];
+                        if jet.perp2() >= dcut { Some(jet) } else { None }
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
             _ => panic!("Unsupported algorithm"),
         }
     }
@@ -223,14 +235,6 @@ impl ClusterSequence {
 
         let left_bj_jet: &mut J;
         let right_bj_jet: &mut J;
-
-        // println!(
-        //     "Splitting at index {} with i_idx {}, and j_idx {}, jetsize {}",
-        //     split_idx,
-        //     i_idx,
-        //     j_idx,x
-        //     jets.len()
-        // );
 
         // we are splitting by i and i< jet_b_idx
         // TODO: messy split_at mut def more generic way to do this since also
@@ -291,21 +295,15 @@ impl ClusterSequence {
         // update tail and head pointers
         for i in 0..n {
             //find min distance
-            //
             let end_idx = n - 1 - i;
-
-            // impossible to not have min deltaR
             let (mut min_idx, min_dij) = di_j[0..=end_idx]
                 .iter()
                 .enumerate()
                 .min_by(|a, b| a.1.total_cmp(&b.1))
                 .unwrap();
 
-            //println!("min_idx {}, min_dij {}", min_idx, min_dij);
-
             let jet_a = &bj_jets[min_idx];
             let mut jet_b_idx = jet_a.nn_jet_index(); //THIS IS AN OPTION
-            //let jet_b: Option<&BriefJet> = jet_b_idx.map(|idx| &bj_jets[idx]);
 
             // normalize
             let min_dij = min_dij * self._invr2;
@@ -317,7 +315,8 @@ impl ClusterSequence {
                         std::mem::swap(&mut min_idx, &mut _jet_b_idx);
                     }
                     // nn is the new index we want to store the recombined index at
-                    //modify jetB for BJ with new info
+                    // modify jetB for BJ with new info
+
                     let new_bj = self.do_jet_jet_recombination_step(
                         bj_jets[min_idx]._jets_index,
                         bj_jets[_jet_b_idx]._jets_index,
@@ -327,18 +326,23 @@ impl ClusterSequence {
                     jet_b_idx = Some(_jet_b_idx);
                 }
                 None => {
-                    // jet beam recombination
                     self.do_jet_beam_recombination_step(bj_jets[min_idx]._jets_index, min_dij);
                 }
             };
 
             //moves recombined min_idx with potential new NN jet at end_idx
-            //swap jetA with tail vector
-            bj_jets.swap(min_idx, end_idx);
-            // now swap the min distances loc also
-            di_j.swap(min_idx, end_idx);
+            //copy tail values to jetA
+            bj_jets[min_idx] = bj_jets[end_idx].clone();
+            // now copy over tail values to the min distances loc also
+            di_j[min_idx] = di_j[end_idx];
 
-            //println!("swapping min_idx {} with end_idx {}", min_idx, end_idx);
+            //check entire list and update NN of references to new jet
+            //very slow O(n) each time, compared to implicit pointer copying in C++
+            for i in 0..bj_jets.len() {
+                if bj_jets[i].nn_jet_index() == Some(end_idx) {
+                    bj_jets[i].set_nn_jet(Some(min_idx));
+                }
+            }
 
             // find all NN of recombined jet_b
             let tail = end_idx;
@@ -346,13 +350,11 @@ impl ClusterSequence {
                 Some(_jet_b_idx) => {
                     for i in 0..tail {
                         // see if jetI had jetA or jetB as a NN if so recalc NN
-
                         if bj_jets[i].nn_jet_index() == Some(min_idx)
                             || bj_jets[i].nn_jet_index() == jet_b_idx
                         {
                             self.bj_set_nn_nocross(i, 0, tail, &mut bj_jets[0..tail]);
                             di_j[i] = ClusterSequence::_bj_dij(&bj_jets[i], &bj_jets);
-                            println!("Jet {} has new NN {} at line {}", i, di_j[i], line!());
                         }
 
                         if _jet_b_idx == i {
@@ -365,13 +367,7 @@ impl ClusterSequence {
 
                         let mut_jets = self.split_bj_mut_slices(i, _jet_b_idx, &mut bj_jets);
                         let jet_ib_dist = ClusterSequence::bj_dist(mut_jets.0, mut_jets.1);
-                        println!(
-                            "Jet {} and jet_b {} with dist {} at line {}",
-                            i,
-                            _jet_b_idx,
-                            jet_ib_dist,
-                            line!()
-                        );
+
                         //TODO clean up next two blocks of comparing and setting nn_dist
                         {
                             if jet_ib_dist < bj_jets[i].nn_dist() {
@@ -382,13 +378,6 @@ impl ClusterSequence {
                                 }
                                 let jet_i = &bj_jets[i];
                                 di_j[i] = ClusterSequence::_bj_dij(jet_i, &bj_jets);
-                                println!(
-                                    "Jet {} and jet_b {} with dist {} at line {}",
-                                    i,
-                                    _jet_b_idx,
-                                    di_j[i],
-                                    line!()
-                                );
                             }
                         }
 
@@ -409,35 +398,21 @@ impl ClusterSequence {
                     }
                     // update new bj_dij for jetB in diJ arr
                     di_j[_jet_b_idx] = ClusterSequence::_bj_dij(&bj_jets[_jet_b_idx], &bj_jets);
-                    println!(
-                        "Updated di_j with for jetB (from jj recomb) to {}",
-                        di_j[_jet_b_idx]
-                    );
                 }
                 None => {
                     //slice of _jets
                     //check if old JetA was NN to jet being mapped
                     for i in 0..tail {
                         match bj_jets[i].nn_jet_index() {
-                            Some(jet_i_idx) => {
-                                if jet_i_idx == min_idx {
+                            Some(jet_i_nn_idx) => {
+                                if jet_i_nn_idx == min_idx {
                                     //TODO: verify this aka setting di_j and how much of bjjets to include
-                                    self.bj_set_nn_nocross(
-                                        jet_i_idx,
-                                        0,
-                                        tail,
-                                        &mut bj_jets[0..tail],
-                                    );
-                                    di_j[i] =
-                                        ClusterSequence::_bj_dij(&bj_jets[jet_i_idx], &bj_jets);
-                                    println!(
-                                        "Updated di_j for jetB (from jB recomb) to {}",
-                                        di_j[i]
-                                    );
+                                    self.bj_set_nn_nocross(i, 0, tail, &mut bj_jets[0..tail]);
+                                    di_j[i] = ClusterSequence::_bj_dij(&bj_jets[i], &bj_jets);
                                 }
                                 //if jet has NN of tail then used to be jetA
-                                if jet_i_idx == end_idx {
-                                    bj_jets[jet_i_idx].set_nn_jet(Some(min_idx));
+                                if jet_i_nn_idx == end_idx {
+                                    bj_jets[jet_i_nn_idx].set_nn_jet(Some(min_idx));
                                 }
                             }
                             None => {}
@@ -455,30 +430,12 @@ impl ClusterSequence {
         min_dij: f64,
     ) -> BriefJet {
         // recombine jet_a and jet_b into new_jet
-
-        println!(
-            "Jet-Jet A index {} B index {} and distance {}",
-            jet_a_idx, jet_b_idx, min_dij
-        );
         let mut new_jet = self
             .jetdef
             .recombine(&self.particles[jet_a_idx], &self.particles[jet_b_idx]);
 
         // push new_jet onto particles
         self.particles.push(new_jet);
-
-        let bj = BriefJet {
-            eta: new_jet.rap(),
-            phi: new_jet.phi(),
-            kt2: if new_jet.kt2() > 1e-300 {
-                1. / new_jet.kt2()
-            } else {
-                1e300
-            }, //TODO: implement jet_scale_for_algorithm
-            _jets_index: self.particles.len() - 1,
-            nn_dist: self.r2,
-            nn_jet_index: None,
-        };
 
         // get it's index (new size of vec - 1)
         let new_idx = self.particles.len() - 1;
@@ -496,14 +453,21 @@ impl ClusterSequence {
             min_dij,
         );
 
-        bj
+        BriefJet {
+            eta: new_jet.rap(),
+            phi: new_jet.phi(),
+            kt2: if new_jet.kt2() > 1e-300 {
+                1. / new_jet.kt2()
+            } else {
+                1e300
+            }, //TODO: implement jet_scale_for_algorithm
+            _jets_index: self.particles.len() - 1,
+            nn_dist: self.r2,
+            nn_jet_index: None,
+        }
     }
 
     fn do_jet_beam_recombination_step(&mut self, jet_index: usize, d_ij: f64) {
-        println!(
-            "Jet-Beam recomb A index {} with distance {}",
-            jet_index, d_ij
-        );
         self.add_recomb_to_history(
             self.particles[jet_index].cluster_hist_index(),
             JetErrors::BeamJet as usize,
@@ -537,62 +501,40 @@ impl ClusterSequence {
         //TODO: add flag for writeout combinations
 
         let child_hist_index: usize = self._history.len() - 1;
-
+        if self._history[parent1].child != JetErrors::Invalid as usize {
+            panic!("Child history index already set");
+        }
         self._history[parent1].child = child_hist_index;
 
-        if jet_index != JetErrors::Invalid as usize {
-            self.particles[jet_index].set_cluster_hist_index(child_hist_index);
-        }
         if !(parent2 == JetErrors::BeamJet as usize
             || parent2 == JetErrors::Invalid as usize
             || parent2 == JetErrors::InexistentParent as usize)
         {
+            if self._history[parent2].child != JetErrors::Invalid as usize {
+                panic!("Child history index already set");
+            }
             self._history[parent2].child = child_hist_index;
+        }
+
+        if jet_index != JetErrors::Invalid as usize {
+            if jet_index == JetErrors::BeamJet as usize
+                || jet_index == JetErrors::InexistentParent as usize
+            {
+                panic!("Jet_index has incorrect index (Beam jet or Inexistent parent)");
+            }
+            self.particles[jet_index].set_cluster_hist_index(child_hist_index);
         }
     }
 
     fn _bj_dij<J: ProxyJet>(jet: &J, jets: &[J]) -> f64 {
         let mut kt2 = jet.kt2();
-
-        // println!("kt2: {}", kt2);
-        // println!("jet.nn_dist: {:?}", jet.nn_dist());
-        // println!("jet.nn_jet_index: {:?}", jet.nn_jet_index());
-        //
-        // match jet.nn_jet_index() {
-        //     Some(jet_index) if jet_index > 400 => {
-        //         println!(
-        //             "Printing entire vector of NN for jet_index: {:?}",
-        //             jets.into_iter()
-        //                 .map(|jet| jet.nn_jet_index())
-        //                 .map(|index| index)
-        //                 .collect::<Vec<Option<usize>>>()
-        //         );
-        //     }
-        //     _ => {}
-        // }
-
         jet.nn_jet_index().map(|index| {
             if jets[index].kt2() < kt2 {
                 kt2 = jets[index].kt2();
             }
         });
-
         jet.nn_dist() * kt2
     }
-
-    // #[allow(dead_code)]
-    // #[inline]
-    // fn bj_dij<'a, J: ProxyJet>(jet: &J, array_jets: &[J]) -> f64 {
-    //     let kt2 = jet.kt2();
-    //     jet.nn_dist()
-    //         * (match jet.nn_jet_index() {
-    //             Some(jet_b_index) => {
-    //                 let jet_b_kt2 = array_jets[jet_b_index].kt2();
-    //                 if jet_b_kt2 < kt2 { jet_b_kt2 } else { kt2 }
-    //             }
-    //             None => jet.nn_dist() * kt2,
-    //         })
-    // }
 
     // BriefJet == eta, phi ,kt2, NN_dist,
     // pointer to NN, and index of jet from array
@@ -622,8 +564,6 @@ impl ClusterSequence {
     fn bj_dist<J: ProxyJet>(jet_a: &mut J, jet_b: &mut J) -> f64 {
         let dphi: f64 = PI - f64::abs(PI - f64::abs(jet_a.phi() - jet_b.phi()));
         let deta: f64 = jet_a.eta() - jet_b.eta();
-        // println!("phi: {}", dphi);
-        // println!("eta: {}", deta);
         dphi * dphi + deta * deta
     }
 
@@ -631,8 +571,6 @@ impl ClusterSequence {
     fn _bj_dist<J: ProxyJet>(jet_a: &mut J, jet_b: &mut J) -> f64 {
         let dphi: f64 = PI - f64::abs(PI - f64::abs(jet_a.phi() - jet_b.phi()));
         let deta: f64 = jet_a.eta() - jet_b.eta();
-        println!("phi: {}", dphi);
-        println!("eta: {}", deta);
         dphi * dphi + deta * deta
     }
 
@@ -677,7 +615,6 @@ impl ClusterSequence {
             for jet_b_idx in head_idx..curr_idx {
                 let mut_jets = self.split_bj_mut_slices(curr_idx, jet_b_idx, jets);
                 let dist = ClusterSequence::bj_dist(mut_jets.0, mut_jets.1);
-                //let dist = ClusterSequence::bj_dist(&mut jets[curr_idx], jet_b);
                 if dist < nn_dist {
                     nn_dist = dist;
                     nn = Some(jet_b_idx);
@@ -689,7 +626,6 @@ impl ClusterSequence {
             for jet_b_idx in curr_idx + 1..tail_idx {
                 let mut_jets = self.split_bj_mut_slices(curr_idx, jet_b_idx, jets);
                 let dist = ClusterSequence::bj_dist(mut_jets.0, mut_jets.1);
-                //let dist = ClusterSequence::bj_dist(&mut jets[curr_idx], jet_b);
                 if dist < nn_dist {
                     nn_dist = dist;
                     nn = Some(jet_b_idx);
@@ -697,33 +633,23 @@ impl ClusterSequence {
             }
         }
 
-        println!(
-            "Dist for jetI {} to jet_b {} is {} at {}",
-            curr_idx,
-            nn.unwrap_or(666),
-            nn_dist,
-            line!()
-        );
         jets[curr_idx].set_nn_jet(nn);
         jets[curr_idx].set_nn_dist(nn_dist);
     }
     #[inline]
     fn bj_set_nn_crosscheck<'b, 'a, J: ProxyJet>(&'b self, jets: &'a mut [J]) -> () {
         let mut nn_dist = self.r2;
-        let mut nn: Option<usize> = None; //ENTIRE scope
+        let mut nn: Option<usize> = None;
         let n = jets.len() - 1;
         for i in 0..n {
             let mut_jets = self.split_bj_mut_slices(n, i, jets);
             let dist = ClusterSequence::bj_dist(mut_jets.0, mut_jets.1);
-            //let dist = ClusterSequence::bj_dist(&mut jets[n], &mut jets[i]);
-            // println!("dist: {}", dist);
-            // println!("jets[i].nn_dist(): {:?}", jets[i].nn_dist());
             if dist < nn_dist {
                 nn_dist = dist;
-                nn = Some(i); //HERE NN has ref to jets
+                nn = Some(i);
             }
             if dist < jets[i].nn_dist() {
-                jets[i].set_nn_dist(dist); //change jets &mut
+                jets[i].set_nn_dist(dist);
                 jets[i].set_nn_jet(Some(n));
             }
         }
