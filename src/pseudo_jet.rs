@@ -77,6 +77,8 @@ impl PseudoJet {
         };
         self._phi
     }
+    
+    
 
     #[inline]
     pub fn _set_rap_phi(&mut self) {

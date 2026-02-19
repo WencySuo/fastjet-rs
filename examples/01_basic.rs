@@ -55,7 +55,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("Particles size {}", clust_seq.particles.len());
 
-    let mut inclusive_jets: Vec<PseudoJet> = clust_seq.inclusive_jets(pmin);
+    let mut inclusive_jets: Vec<PseudoJet> = clust_seq.inclusive_jets(0.0);
 
     println!("Inclusive Jets size {}", inclusive_jets.len());
     let inclusive_jets: &mut Vec<PseudoJet> = PseudoJet::sorted_by_pt(&mut inclusive_jets);
