@@ -5,7 +5,7 @@ pub struct BriefJet {
     pub kt2: f64,
     pub nn_dist: f64, // either nn_dist == option, or only read dist if nn_jet != None
     pub nn_jet_index: Option<usize>, //TODO: investigate if box is best way to do this
-    pub _jets_index: usize,     // either index == option, or only read index if nn_jet != None
+    pub _jets_index: usize, // either index == option, or only read index if nn_jet != None
 }
 
 // pub struct TiledJet {
@@ -18,7 +18,7 @@ pub struct BriefJet {
 // } //include linked lists for NN dist
 
 //empty struct for now
-pub struct TiledJet<> {}
+pub struct TiledJet {}
 
 impl BriefJet {
     // TODO: removed since not used yet
@@ -57,21 +57,21 @@ pub trait ProxyJet {
 
     fn kt2(&self) -> f64;
 
-    fn eta_jet_type(&self, jet: & JetType) -> f64 {
+    fn eta_jet_type(&self, jet: &JetType) -> f64 {
         match jet {
             JetType::BriefJetType(jet) => jet.eta(),
             _ => panic!("Unsupported jet type"),
         }
     }
 
-    fn phi_jet_type(&self, jet: & JetType) -> f64 {
+    fn phi_jet_type(&self, jet: &JetType) -> f64 {
         match jet {
             JetType::BriefJetType(jet) => jet.phi(),
             _ => panic!("Unsupported jet type"),
         }
     }
 
-    fn kt2_jet_type(&self, jet: & JetType) -> f64 {
+    fn kt2_jet_type(&self, jet: &JetType) -> f64 {
         match jet {
             JetType::BriefJetType(jet) => jet.kt2(),
             _ => panic!("Unsupported jet type"),
@@ -80,9 +80,8 @@ pub trait ProxyJet {
 
     fn create_jet_type(&'_ self) -> JetType<'_>;
 
-
     //TODO: how to call different types of jet types
-    fn nn_jet_index<'a>(&'a self) -> Option<usize>;
+    fn nn_jet_index(&self) -> Option<usize>;
 
     fn nn_dist(&self) -> f64;
 
@@ -100,9 +99,8 @@ pub trait ProxyJet {
 
 pub enum JetType<'a> {
     BriefJetType(&'a BriefJet),
-    TiledJetType( TiledJet),
+    TiledJetType(TiledJet),
 }
-
 
 impl ProxyJet for BriefJet {
     #[inline]
@@ -125,7 +123,7 @@ impl ProxyJet for BriefJet {
         self.nn_dist
     }
 
-    fn create_jet_type(&'_ self) -> JetType<'_>{
+    fn create_jet_type(&'_ self) -> JetType<'_> {
         JetType::BriefJetType(self)
     }
 

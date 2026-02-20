@@ -11,17 +11,17 @@ mod tests {
 
         #[test]
         fn accessors_return_expected_components() {
-            let mut jet = PseudoJet::new(3.0, 4.0, 12.0, 15.0);
+            let jet = PseudoJet::new(3.0, 4.0, 12.0, 15.0);
             assert_eq!(jet.E(), 15.0);
             assert_eq!(jet.e(), 15.0);
             assert_eq!(jet.px(), 3.0);
             assert_eq!(jet.py(), 4.0);
             assert_eq!(jet.pz(), 12.0);
-            assert_eq!(jet.rap(), 1.0986122886681098);
-            assert_eq!(jet.phi(), 0.9272952180016122);
-            assert_eq!(jet.kt2(), 25.0);
-            assert_eq!(jet.pt2(), 25.0);
-            assert_eq!(jet.perp2(), 25.0);
+            assert_eq!(*jet.rap(), 1.0986122886681098);
+            assert_eq!(*jet.phi(), 0.9272952180016122);
+            assert_eq!(*jet.kt2(), 25.0);
+            assert_eq!(*jet.pt2(), 25.0);
+            assert_eq!(*jet.perp2(), 25.0);
         }
 
         #[test]
@@ -80,14 +80,14 @@ mod tests {
         fn add_returns_componentwise_sum() {
             let a = PseudoJet::new(1.0, 2.0, 3.0, 4.0);
             let b = PseudoJet::new(0.5, 1.5, 2.5, 3.5);
-            let mut c = a + b;
+            let c = a + b;
             assert_eq!(c.px(), 1.5);
             assert_eq!(c.py(), 3.5);
             assert_eq!(c.pz(), 5.5);
             assert_eq!(c.e(), 7.5);
-            assert_eq!(c.kt2(), 14.5);
-            assert_eq!(c.phi(), 1.1659045405098132);
-            assert_eq!(c.rap(), 0.9359010884507957);
+            assert_eq!(*c.kt2(), 14.5);
+            assert_eq!(*c.phi(), 1.1659045405098132);
+            assert_eq!(*c.rap(), 0.9359010884507957);
         }
 
         #[test]
@@ -99,23 +99,23 @@ mod tests {
             assert_eq!(a.py(), 3.5);
             assert_eq!(a.pz(), 5.5);
             assert_eq!(a.e(), 7.5);
-            assert_eq!(a.kt2(), 14.5);
-            assert_eq!(a.phi(), 1.1659045405098132);
-            assert_eq!(a.rap(), 0.9359010884507957);
+            assert_eq!(*a.kt2(), 14.5);
+            assert_eq!(*a.phi(), 1.1659045405098132);
+            assert_eq!(*a.rap(), 0.9359010884507957);
         }
 
         #[test]
         fn sub_returns_componentwise_difference() {
             let a = PseudoJet::new(1.0, 2.0, 3.0, 4.0);
             let b = PseudoJet::new(0.5, 1.5, 2.5, 3.5);
-            let mut c = a - b;
+            let c = a - b;
             assert_eq!(c.px(), 0.5);
             assert_eq!(c.py(), 0.5);
             assert_eq!(c.pz(), 0.5);
             assert_eq!(c.e(), 0.5);
-            assert_eq!(c.kt2(), 0.5);
-            assert_eq!(c.phi(), 0.7853981633974483);
-            assert_eq!(c.rap(), 0.34657359027997264);
+            assert_eq!(*c.kt2(), 0.5);
+            assert_eq!(*c.phi(), 0.7853981633974483);
+            assert_eq!(*c.rap(), 0.34657359027997264);
         }
 
         #[test]
@@ -127,22 +127,22 @@ mod tests {
             assert_eq!(a.py(), 0.5);
             assert_eq!(a.pz(), 0.5);
             assert_eq!(a.e(), 0.5);
-            assert_eq!(a.kt2(), 0.5);
-            assert_eq!(a.phi(), 0.7853981633974483);
-            assert_eq!(a.rap(), 0.34657359027997264);
+            assert_eq!(*a.kt2(), 0.5);
+            assert_eq!(*a.phi(), 0.7853981633974483);
+            assert_eq!(*a.rap(), 0.34657359027997264);
         }
 
         #[test]
         fn mul_scales_four_momentum_and_cached_kt2() {
             let jet: PseudoJet = PseudoJet::new(1.0, 2.0, 3.0, 4.0);
-            let mut out: PseudoJet = jet * 3.0;
+            let out: PseudoJet = jet * 3.0;
             assert_eq!(out.px(), 3.0);
             assert_eq!(out.py(), 6.0);
             assert_eq!(out.pz(), 9.0);
             assert_eq!(out.e(), 12.0);
-            assert_eq!(out.kt2(), 45.0);
-            assert_eq!(out.phi(), 1.1071487177940904);
-            assert_eq!(out.rap(), 0.9729550745276567);
+            assert_eq!(*out.kt2(), 45.0);
+            assert_eq!(*out.phi(), 1.1071487177940904);
+            assert_eq!(*out.rap(), 0.9729550745276567);
         }
 
         #[test]
@@ -153,7 +153,7 @@ mod tests {
             assert_eq!(out.py(), 4.0);
             assert_eq!(out.pz(), 6.0);
             assert_eq!(out.e(), 8.0);
-            assert_eq!(out.kt2(), 20.0);
+            assert_eq!(*out.kt2(), 20.0);
         }
 
         #[test]
@@ -164,7 +164,7 @@ mod tests {
             assert_eq!(jet.py(), 4.0);
             assert_eq!(jet.pz(), 6.0);
             assert_eq!(jet.e(), 8.0);
-            assert_eq!(jet.kt2(), 20.0);
+            assert_eq!(*jet.kt2(), 20.0);
         }
 
         #[test]
@@ -175,7 +175,7 @@ mod tests {
             assert_eq!(out.py(), 2.0);
             assert_eq!(out.pz(), 3.0);
             assert_eq!(out.e(), 4.0);
-            assert_eq!(out.kt2(), 5.0);
+            assert_eq!(*out.kt2(), 5.0);
         }
 
         #[test]
@@ -186,7 +186,7 @@ mod tests {
             assert_eq!(jet.py(), 2.0);
             assert_eq!(jet.pz(), 3.0);
             assert_eq!(jet.e(), 4.0);
-            assert_eq!(jet.kt2(), 5.0);
+            assert_eq!(*jet.kt2(), 5.0);
         }
 
         #[test]

@@ -5,33 +5,34 @@ use fastjet_rs::cluster_sequence::RecombinationScheme;
 use fastjet_rs::cluster_sequence::Strategy;
 use fastjet_rs::pseudo_jet::PseudoJet;
 use std::fs::File;
+use std::io::stdout;
 use std::io::{BufRead, BufReader};
-use std::path::Path;
+use std::io::{BufWriter, Write};
+
+use std::time::SystemTime;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     //TODO: prolly optimize reading lol
+    //
+    let now = SystemTime::now();
 
-    // read in input particles
-    let file_path = Path::new("./examples/data/single-event.dat");
-    let file = File::open(&file_path)?;
-    let reader = BufReader::new(file);
+    let file = File::open("./examples/data/single-event.dat")?;
+    let mut reader = BufReader::new(file);
 
-    let mut input_particles: Vec<PseudoJet> = Vec::new();
+    let mut input_particles = Vec::new();
+    let mut line = String::new();
 
-    for line in reader.lines() {
-        let line = line?;
+    while reader.read_line(&mut line)? != 0 {
+        let mut it = line.split_whitespace();
 
-        //create pseudojet
-        let floats = line.trim().split_whitespace();
-        let floats = floats.map(|s| s.parse().unwrap()).collect::<Vec<f64>>();
+        let px: f64 = it.next().unwrap().parse().unwrap();
+        let py: f64 = it.next().unwrap().parse().unwrap();
+        let pz: f64 = it.next().unwrap().parse().unwrap();
+        let e: f64 = it.next().unwrap().parse().unwrap();
 
-        let px = floats[0];
-        let py = floats[1];
-        let pz = floats[2];
-        let e = floats[3];
-
-        //println!("Particle: ({}, {}, {}, {})", px, py, pz, e);
         input_particles.push(PseudoJet::new(px, py, pz, e));
+
+        line.clear();
     }
 
     //TODO: more default constructors
@@ -51,23 +52,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let pmin = 5.0;
 
-    let mut inclusive_jets: Vec<PseudoJet> = clust_seq.inclusive_jets(pmin);
+    let mut inclusive_jets: Vec<&PseudoJet> = clust_seq.inclusive_jets(pmin);
 
-    let inclusive_jets: &mut Vec<PseudoJet> = PseudoJet::sorted_by_pt(&mut inclusive_jets);
+    let inclusive_jets: &mut Vec<&PseudoJet> = PseudoJet::sorted_by_pt(&mut inclusive_jets);
 
-    println!(
-        "{:>5} {:>15} {:>15} {:>15}\n",
+    println!("Time elapse is {:?}", now.elapsed());
+
+    let stdout = stdout();
+    let mut out = BufWriter::new(stdout.lock());
+
+    writeln!(
+        out,
+        "{:>5} {:>15} {:>15} {:>15}",
         "jet #", "rapiddity", "phi", "pt"
-    );
+    )?;
 
     for (i, jet) in inclusive_jets.iter_mut().enumerate() {
-        println!(
+        writeln!(
+            out,
             "{:>5} {:>15.8} {:>15.8} {:>15.8}",
             i,
             jet.rap(),
             jet.phi(),
             jet.pt()
-        );
+        )?;
     }
 
     Ok(())

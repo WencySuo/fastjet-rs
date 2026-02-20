@@ -3,8 +3,13 @@ name = "fastjet-rs"
 version = "0.1.0"
 edition = "2024"
 
+[profile.profiling]
+inherits = "release"
+debug = "line-tables-only"
+
 [dependencies]
 
-[[bin]]
-name = "example_01"
-path = "examples/01_basic.rs"
+[profile.release]
+codegen-units = 1
+lto = "thin"
+

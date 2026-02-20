@@ -1,17 +1,18 @@
-use crate::cluster_sequence::JetErrors;
+use crate::cluster_sequence::INVALID;
 use crate::constants::PI;
+use std::cell::OnceCell;
 use std::ops;
 
 #[allow(non_snake_case)]
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub struct PseudoJet {
     _px: f64,
     _py: f64,
     _pz: f64,
     _E: f64,
-    _rap: f64,
-    _phi: f64,
-    _kt2: f64, // _cluster_hist_index, _user_index (no clue what these are for yet)
+    _rap: OnceCell<f64>,
+    _phi: OnceCell<f64>,
+    _kt2: OnceCell<f64>, // _cluster_hist_index, _user_index (no clue what these are for yet)
     _cluster_hist_index: usize,
 }
 
@@ -19,19 +20,16 @@ pub struct PseudoJet {
 
 #[allow(non_snake_case)]
 impl PseudoJet {
-    pub const PSEUDOJET_INVALID_PHI: f64 = -100.0;
-    pub const PSEUDOJET_INVALID_RAP: f64 = -1e200;
-
     pub fn new(px: f64, py: f64, pz: f64, E: f64) -> Self {
         PseudoJet {
             _px: px,
             _py: py,
             _pz: pz,
             _E: E,
-            _kt2: (px * px + py * py),
-            _phi: Self::PSEUDOJET_INVALID_PHI,
-            _rap: Self::PSEUDOJET_INVALID_RAP,
-            _cluster_hist_index: JetErrors::Invalid as usize,
+            _kt2: OnceCell::from(px * px + py * py),
+            _phi: OnceCell::new(),
+            _rap: OnceCell::new(),
+            _cluster_hist_index: INVALID,
         }
     }
 
@@ -61,66 +59,93 @@ impl PseudoJet {
     }
 
     #[inline]
-    pub fn rap(&mut self) -> f64 {
-        match self._rap {
-            Self::PSEUDOJET_INVALID_RAP => self._set_rap_phi(),
-            _ => {}
-        };
-        self._rap
-    }
-
-    #[inline]
-    pub fn phi(&mut self) -> f64 {
-        match self._phi {
-            Self::PSEUDOJET_INVALID_PHI => self._set_rap_phi(),
-            _ => {}
-        };
-        self._phi
-    }
-    
-    
-
-    #[inline]
-    pub fn _set_rap_phi(&mut self) {
-        let max_rap: f64 = 1e5;
-        if self.kt2() == 0.0 {
-            self._phi = 0.0;
-        } else {
-            self._phi = self.py().atan2(self.px())
-        }
-
-        if self._phi < 0.0 {
-            self._phi += 2.0 * PI;
-        }
-
-        if self._phi >= 2.0 * PI {
-            self._phi -= 2.0 * PI;
-        }
-
-        if self.e() == self.pz().abs() && self.kt2() == 0.0 {
-            let max_rap_here = max_rap + self.pz().abs();
-            if self.pz() > 0.0 {
-                self._rap = max_rap_here;
+    pub fn rap(&self) -> &f64 {
+        self._rap.get_or_init(|| {
+            let max_rap: f64 = 1e5;
+            let mut rap;
+            let kt2 = *self.kt2();
+            if self.e() == self.pz().abs() && kt2 == 0.0 {
+                let max_rap_here = max_rap + self.pz().abs();
+                if self.pz() > 0.0 {
+                    rap = max_rap_here;
+                } else {
+                    rap = -max_rap_here;
+                }
             } else {
-                self._rap = -max_rap_here;
+                let effective_m2 = self.m2().max(0.0);
+                let e_plus_pz = self.e() + self.pz().abs();
+                rap = 0.5 * ((kt2 + effective_m2) / (e_plus_pz * e_plus_pz)).ln();
+                if self.pz() > 0.0 {
+                    rap = -rap;
+                }
             }
-        } else {
-            let effective_m2 = self.m2().max(0.0);
-            let e_plus_pz = self.e() + self.pz().abs();
-            self._rap = 0.5 * ((self.kt2() + effective_m2) / (e_plus_pz * e_plus_pz)).ln();
-            if self.pz() > 0.0 {
-                self._rap = -self._rap;
-            }
-        }
+            rap
+        })
     }
 
     #[inline]
-    pub fn kt2(&self) -> f64 {
+    pub fn phi(&self) -> &f64 {
+        self._phi.get_or_init(|| {
+            let mut phi;
+            if *(self.kt2()) == 0.0 {
+                phi = 0.0;
+            } else {
+                phi = self.py().atan2(self.px())
+            }
+
+            if phi < 0.0 {
+                phi += 2.0 * PI;
+            }
+
+            if phi >= 2.0 * PI {
+                phi -= 2.0 * PI;
+            }
+            phi
+        })
+    }
+
+    // #[inline]
+    // pub fn _set_rap_phi() {
+    //     let max_rap: f64 = 1e5;
+    //     if self.kt2() == 0.0 {
+    //         self._phi = 0.0;
+    //     } else {
+    //         self._phi = self.py().atan2(self.px())
+    //     }
+
+    //     if self._phi < 0.0 {
+    //         self._phi += 2.0 * PI;
+    //     }
+
+    //     if self._phi >= 2.0 * PI {
+    //         self._phi -= 2.0 * PI;
+    //     }
+
+    //     if self.e() == self.pz().abs() && self.kt2() == 0.0 {
+    //         let max_rap_here = max_rap + self.pz().abs();
+    //         if self.pz() > 0.0 {
+    //             self._rap = max_rap_here;
+    //         } else {
+    //             self._rap = -max_rap_here;
+    //         }
+    //     } else {
+    //         let effective_m2 = self.m2().max(0.0);
+    //         let e_plus_pz = self.e() + self.pz().abs();
+    //         self._rap = 0.5 * ((self.kt2() + effective_m2) / (e_plus_pz * e_plus_pz)).ln();
+    //         if self.pz() > 0.0 {
+    //             self._rap = -self._rap;
+    //         }
+    //     }
+    // }
+
+    #[inline]
+    pub fn kt2(&self) -> &f64 {
         self._kt2
+            .get_or_init(|| self._px * self._px + self._py * self._py)
     }
 
     #[inline]
-    pub fn pt2(&self) -> f64 {
+    pub fn pt2(&self) -> &f64 {
         self.kt2()
     }
 
@@ -131,12 +156,11 @@ impl PseudoJet {
 
     /// returns the squared transverse mass = kt^2+m^2
     #[inline]
-    pub fn perp2(&self) -> f64 {
+    pub fn perp2(&self) -> &f64 {
         self.kt2()
     }
 
     /// returns the transverse mass = sqrt(kt^2+m^2)
-
     #[inline]
     pub fn perp(&self) -> f64 {
         self.kt2().sqrt()
@@ -213,13 +237,13 @@ impl PseudoJet {
     /// should we have: min(1.0,max(-1.0,_pz/sqrt(modp2())));
     #[inline]
     pub fn cos_theta(&self) -> f64 {
-        return f64::min(1.0, f64::max(-1.0, self._pz / self.modp()));
+        (self._pz / self.modp()).clamp(-1.0, 1.0)
     }
 
     /// polar angle
     #[inline]
     pub fn theta(&self) -> f64 {
-        return self.cos_theta().acos();
+        self.cos_theta().acos()
     }
 
     pub fn set_cluster_hist_index(&mut self, index: usize) {
@@ -231,13 +255,13 @@ impl PseudoJet {
     }
 
     fn finish_init(&mut self) {
-        self._kt2 = self.px() * self.px() + self.py() * self.py();
-        self._phi = Self::PSEUDOJET_INVALID_PHI;
-        self._rap = Self::PSEUDOJET_INVALID_RAP;
+        self._kt2 = OnceCell::from(self.px() * self.px() + self.py() * self.py());
+        self._phi = OnceCell::new();
+        self._rap = OnceCell::new();
     }
 
     // TODO: investigate if we need custom sorting implementation for performance reasons
-    pub fn sorted_by_pt<'a>(jets: &'a mut Vec<PseudoJet>) -> &'a mut Vec<PseudoJet> {
+    pub fn sorted_by_pt<'a>(jets: &'a mut Vec<&'a PseudoJet>) -> &'a mut Vec<&'a PseudoJet> {
         jets.sort_by(|a, b| (-a.kt2()).total_cmp(&(-b.kt2())));
         jets
     }
@@ -320,7 +344,7 @@ impl ops::Add<&PseudoJet> for &PseudoJet {
 
 // Summing a jet into this jet
 impl ops::AddAssign<PseudoJet> for PseudoJet {
-    fn add_assign(&mut self, other: PseudoJet) -> () {
+    fn add_assign(&mut self, other: PseudoJet) {
         self._px += other._px;
         self._py += other._py;
         self._pz += other._pz;
@@ -345,7 +369,7 @@ impl ops::Sub<PseudoJet> for PseudoJet {
 
 // Summing a jet into this jet
 impl ops::SubAssign<PseudoJet> for PseudoJet {
-    fn sub_assign(&mut self, other: PseudoJet) -> () {
+    fn sub_assign(&mut self, other: PseudoJet) {
         self._px -= other._px;
         self._py -= other._py;
         self._pz -= other._pz;
@@ -378,12 +402,14 @@ impl ops::Mul<PseudoJet> for f64 {
 }
 
 impl ops::MulAssign<f64> for PseudoJet {
-    fn mul_assign(&mut self, scalar: f64) -> () {
+    fn mul_assign(&mut self, scalar: f64) {
         self._px *= scalar;
         self._py *= scalar;
         self._pz *= scalar;
         self._E *= scalar;
-        self._kt2 = self.kt2() * scalar * scalar;
+        self._kt2 = OnceCell::new();
+        self._rap = OnceCell::new();
+        self._phi = OnceCell::new();
     }
 }
 
@@ -396,29 +422,24 @@ impl ops::Div<f64> for PseudoJet {
 }
 
 impl ops::DivAssign<f64> for PseudoJet {
-    fn div_assign(&mut self, scalar: f64) -> () {
+    fn div_assign(&mut self, scalar: f64) {
         *self *= 1.0 / scalar;
     }
 }
 
 impl PartialEq<PseudoJet> for PseudoJet {
     fn eq(&self, other: &PseudoJet) -> bool {
-        if self._px != other._px
+        !(self._px != other._px
             || self._py != other._py
             || self._pz != other._pz
-            || self._E != other._E
-        {
-            return false;
-        } else {
-            return true;
-        }
+            || self._E != other._E)
     }
 }
 
 impl PartialEq<f64> for PseudoJet {
     fn eq(&self, val: &f64) -> bool {
         match val {
-            0.0 => return self._px == 0.0 && self._py == 0.0 && self._pz == 0.0 && self._E == 0.0,
+            0.0 => self._px == 0.0 && self._py == 0.0 && self._pz == 0.0 && self._E == 0.0,
             _ => panic!("Comparing a PseudoJet with a non-zero constant (double) is not allowed"),
         }
     }
