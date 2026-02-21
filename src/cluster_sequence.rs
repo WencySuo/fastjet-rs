@@ -217,6 +217,62 @@ impl ClusterSequence {
         }
     }
 
+    // note: exclusive jets are not usable well with antikt (only testable later)
+    pub fn get_n_exclusive_jets(&self, dcut: f64) -> usize {
+        // max_dij so far tells us where in the loop a jet < dcut
+        let jets_above_dcut = self
+            ._history
+            .iter()
+            .rev()
+            .take_while(|hist_elem| hist_elem.curr_max_d_ij > dcut)
+            .count();
+        // now we return total jets - jets still in list (particles.len() - jets_above_dcut)
+        2 * self.init_n - (self.particles.len() - jets_above_dcut)
+    }
+
+    pub fn exclusive_jets_dcut(&self, dcut: f64) -> Vec<&PseudoJet> {
+        self.exclusive_jets(self.get_n_exclusive_jets(dcut))
+    }
+
+    pub fn exclusive_jets(&self, n_jets: usize) -> Vec<&PseudoJet> {
+        //check if we are requesting more particles than possible
+        if n_jets > self.init_n {
+            panic!(
+                "Requesting {} jets which are more than the {} particles in the event",
+                n_jets, self.init_n
+            )
+        }
+        self.exclusive_jets_up_to(n_jets)
+    }
+
+    pub fn exclusive_jets_up_to(&self, n_jets: usize) -> Vec<&PseudoJet> {
+        // recombining jets means we lose on jet each merge
+        // idx in histortical clusterings to stop on
+        let mut stop_idx = 2 * self.init_n - n_jets;
+
+        //check if we are requesting more particles than possible
+
+        // max exclusive jets are constrained by # of init input partilces
+        if stop_idx < self.init_n {
+            stop_idx = self.init_n
+        }
+
+        let mut out = Vec::new();
+
+        // loop thru hist to check if parent is last particle before stop_idx
+        // also jet types are near usize::max so they will always > stop_idx
+        for h in self._history.iter().skip(stop_idx) {
+            if h.parent1 < stop_idx {
+                out.push(&self.particles[self._history[h.parent1].jet_index]);
+            }
+            if h.parent2 < stop_idx {
+                out.push(&self.particles[self._history[h.parent2].jet_index]);
+            }
+        }
+
+        out
+    }
+
     pub fn simple_n2_cluster(&mut self) {
         let n = self.particles.len();
 
@@ -428,7 +484,7 @@ impl ClusterSequence {
         self._history.push(element);
 
         let child_hist_index: usize = self._history.len() - 1;
-        if self._history[parent1].child != INVALID{
+        if self._history[parent1].child != INVALID {
             panic!(
                 "Child {} history index for {} already set",
                 self._history[parent1].child, parent1
@@ -436,10 +492,7 @@ impl ClusterSequence {
         }
         self._history[parent1].child = child_hist_index;
 
-        if !(parent2 == BEAMJET
-            || parent2 == INVALID
-            || parent2 == INEXISTENT_PARENT)
-        {
+        if !(parent2 == BEAMJET || parent2 == INVALID || parent2 == INEXISTENT_PARENT) {
             if self._history[parent2].child != INVALID {
                 panic!(
                     "Child {} history index for {} already set",
@@ -450,9 +503,7 @@ impl ClusterSequence {
         }
 
         if jet_index != INVALID {
-            if jet_index == BEAMJET 
-                || jet_index == INEXISTENT_PARENT
-            {
+            if jet_index == BEAMJET || jet_index == INEXISTENT_PARENT {
                 panic!("Jet_index has incorrect index (Beam jet or Inexistent parent)");
             }
             self.particles[jet_index].set_cluster_hist_index(child_hist_index);
