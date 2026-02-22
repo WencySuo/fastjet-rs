@@ -3,8 +3,10 @@
 ## Input features:
 - Implement support for reading input from HepMC files
 - Add support for batching
+- Add python bindings
 
 ## Cluster Sequencing:
+- Refactor static methods in ClusterSequence as part of ProxyJet trait 
 - Implement support for different algorithms other than AntiKt
 - Implement support for different clustering algorithms (Notable N2Tiled
 - Investigate using Rust nightly for 'std::simd' features on floats
@@ -17,5 +19,6 @@
 ## Testing
 - Include more example files with different data
 - Run CI/CD script to verify correctness with FastJet through integration tests
+- backfill unit tests for ClusterSequence, ProxyJet
 
 ... and much more (hopefully).
