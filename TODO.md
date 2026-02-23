@@ -6,7 +6,6 @@
 - Add python bindings
 
 ## Cluster Sequencing:
-- Refactor static methods in ClusterSequence as part of ProxyJet trait 
 - Implement support for different algorithms other than AntiKt
 - Implement support for different clustering algorithms (Notable N2Tiled
 - Investigate using Rust nightly for 'std::simd' features on floats

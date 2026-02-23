@@ -1,3 +1,5 @@
+use crate::constants::PI;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct BriefJet {
     pub eta: f64,
@@ -89,12 +91,9 @@ pub trait ProxyJet {
 
     fn set_nn_jet(&mut self, jet_index: Option<usize>);
 
-    // #[inline]
-    // fn bj_diJ(&self) -> f64 {
-    //     let kt2 = self.kt2();
-    //     match self.NN {}
-    // }
-    //
+    fn _bj_dij<J: ProxyJet>(jet: &J, jets: &[J]) -> f64;
+
+    fn _bj_dist<J: ProxyJet>(jet_a: &J, jet_b: &J) -> f64;
 }
 
 pub enum JetType<'a> {
@@ -140,5 +139,24 @@ impl ProxyJet for BriefJet {
     #[inline]
     fn set_nn_jet(&mut self, jet_index: Option<usize>) {
         self.nn_jet_index = jet_index;
+    }
+
+    #[inline]
+    fn _bj_dist<J: ProxyJet>(jet_a: &J, jet_b: &J) -> f64 {
+        let dphi: f64 = PI - f64::abs(PI - f64::abs(jet_a.phi() - jet_b.phi()));
+        let deta: f64 = jet_a.eta() - jet_b.eta();
+        dphi * dphi + deta * deta
+    }
+
+    #[inline]
+    fn _bj_dij<J: ProxyJet>(jet: &J, jets: &[J]) -> f64 {
+        let mut kt2 = jet.kt2();
+        if let Some(index) = jet.nn_jet_index() {
+            let kt2_b = jets[index].kt2();
+            if kt2_b < kt2 {
+                kt2 = kt2_b;
+            }
+        }
+        jet.nn_dist() * kt2
     }
 }

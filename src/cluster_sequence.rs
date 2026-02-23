@@ -1,6 +1,5 @@
 use std::panic;
 
-use crate::constants::PI;
 use crate::proxy_jet::BriefJet;
 use crate::proxy_jet::ProxyJet;
 use crate::pseudo_jet::PseudoJet;
@@ -300,7 +299,7 @@ impl ClusterSequence {
         let mut di_j: Vec<f64> = vec![0.0; n];
 
         di_j.iter_mut().enumerate().for_each(|(i, jet)| {
-            *jet = ClusterSequence::_bj_dij(&bj_jets[i], &bj_jets);
+            *jet = BriefJet::_bj_dij(&bj_jets[i], &bj_jets);
         });
 
         for i in 0..n {
@@ -366,7 +365,7 @@ impl ClusterSequence {
                             || bj_jets[i].nn_jet_index() == jet_b_idx
                         {
                             self.bj_set_nn_nocross(i, 0, tail, &mut bj_jets[0..tail]);
-                            di_j[i] = ClusterSequence::_bj_dij(&bj_jets[i], &bj_jets);
+                            di_j[i] = BriefJet::_bj_dij(&bj_jets[i], &bj_jets);
                         }
 
                         if _jet_b_idx == i {
@@ -377,13 +376,12 @@ impl ClusterSequence {
                             continue;
                         }
 
-                        let jet_ib_dist =
-                            ClusterSequence::_bj_dist(&bj_jets[i], &bj_jets[_jet_b_idx]);
+                        let jet_ib_dist = BriefJet::_bj_dist(&bj_jets[i], &bj_jets[_jet_b_idx]);
 
                         if jet_ib_dist < bj_jets[i].nn_dist() {
                             bj_jets[i].set_nn_dist(jet_ib_dist);
                             bj_jets[i].set_nn_jet(jet_b_idx);
-                            di_j[i] = ClusterSequence::_bj_dij(&bj_jets[i], &bj_jets);
+                            di_j[i] = BriefJet::_bj_dij(&bj_jets[i], &bj_jets);
                         }
 
                         // check if jetI is potentially jetB's NN
@@ -398,7 +396,7 @@ impl ClusterSequence {
                         }
                     }
                     // update new bj_dij for jetB in diJ arr
-                    di_j[_jet_b_idx] = ClusterSequence::_bj_dij(&bj_jets[_jet_b_idx], &bj_jets);
+                    di_j[_jet_b_idx] = BriefJet::_bj_dij(&bj_jets[_jet_b_idx], &bj_jets);
                 }
                 None => {
                     //check if old JetA was NN to jet being mapped
@@ -406,7 +404,7 @@ impl ClusterSequence {
                         if let Some(jet_i_nn_idx) = bj_jets[i].nn_jet_index() {
                             if jet_i_nn_idx == min_idx {
                                 self.bj_set_nn_nocross(i, 0, tail, &mut bj_jets[0..tail]);
-                                di_j[i] = ClusterSequence::_bj_dij(&bj_jets[i], &bj_jets);
+                                di_j[i] = BriefJet::_bj_dij(&bj_jets[i], &bj_jets);
                             }
                             //if jet has NN of tail then used to be jetA
                             if jet_i_nn_idx == end_idx {
@@ -510,26 +508,7 @@ impl ClusterSequence {
         }
     }
 
-    #[inline]
-    fn _bj_dij<J: ProxyJet>(jet: &J, jets: &[J]) -> f64 {
-        let mut kt2 = jet.kt2();
-        if let Some(index) = jet.nn_jet_index() {
-            let kt2_b = jets[index].kt2();
-            if kt2_b < kt2 {
-                kt2 = kt2_b;
-            }
-        }
-        jet.nn_dist() * kt2
-    }
-
     // -----------STATIC METHODS USING PROXYJET--------------
-
-    #[inline]
-    fn _bj_dist<J: ProxyJet>(jet_a: &J, jet_b: &J) -> f64 {
-        let dphi: f64 = PI - f64::abs(PI - f64::abs(jet_a.phi() - jet_b.phi()));
-        let deta: f64 = jet_a.eta() - jet_b.eta();
-        dphi * dphi + deta * deta
-    }
 
     #[inline]
     fn bj_set_nn_nocross<J: ProxyJet>(
@@ -546,7 +525,7 @@ impl ClusterSequence {
         // can prolly use this in for loop with a || stop condition
         if head_idx < curr_idx {
             for jet_b_idx in head_idx..curr_idx {
-                let dist = ClusterSequence::_bj_dist(&jets[curr_idx], &jets[jet_b_idx]);
+                let dist = BriefJet::_bj_dist(&jets[curr_idx], &jets[jet_b_idx]);
                 if dist < nn_dist {
                     nn_dist = dist;
                     nn = Some(jet_b_idx);
@@ -556,7 +535,7 @@ impl ClusterSequence {
 
         if tail_idx > curr_idx {
             for jet_b_idx in curr_idx + 1..tail_idx {
-                let dist = ClusterSequence::_bj_dist(&jets[curr_idx], &jets[jet_b_idx]);
+                let dist = BriefJet::_bj_dist(&jets[curr_idx], &jets[jet_b_idx]);
                 if dist < nn_dist {
                     nn_dist = dist;
                     nn = Some(jet_b_idx);
@@ -574,7 +553,7 @@ impl ClusterSequence {
         let mut nn: Option<usize> = None;
         let n = jets.len() - 1;
         for i in 0..n {
-            let dist = ClusterSequence::_bj_dist(&jets[i], &jets[n]);
+            let dist = BriefJet::_bj_dist(&jets[i], &jets[n]);
             if dist < nn_dist {
                 nn_dist = dist;
                 nn = Some(i);
