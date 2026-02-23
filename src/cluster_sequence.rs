@@ -1,3 +1,4 @@
+use log::warn;
 use std::panic;
 
 use crate::proxy_jet::BriefJet;
@@ -28,6 +29,7 @@ pub enum Strategy {
 }
 
 // TODO: implement other algorithms
+#[derive(PartialEq, Eq)]
 pub enum Algorithm {
     AntiKt,
     Kt,
@@ -117,6 +119,22 @@ impl ClusterSequence {
         clust_seq.fill_init_history();
 
         clust_seq
+    }
+
+    #[inline]
+    fn jet_scale_for_algorithm(jet: &PseudoJet, algorithm: &Algorithm) -> f64 {
+        let kt2 = *jet.kt2();
+        match algorithm {
+            Algorithm::Kt => kt2,
+            Algorithm::AntiKt => {
+                if kt2 > 1e-300 {
+                    1. / kt2
+                } else {
+                    1e300
+                }
+            }
+            Algorithm::Cambridge => 1.0,
+        }
     }
 
     #[inline]
@@ -212,7 +230,21 @@ impl ClusterSequence {
                     }
                 })
                 .collect(),
-            _ => panic!("Unsupported algorithm"),
+            Algorithm::Cambridge => self
+                ._history
+                .iter()
+                .rev()
+                .take_while(|hist_elem| hist_elem.parent2 == BEAMJET)
+                .filter_map(|hist_elem| {
+                    let parent1 = hist_elem.parent1;
+                    let jet = &self.particles[self._history[parent1].jet_index];
+                    if *jet.perp2() >= dcut {
+                        Some(jet)
+                    } else {
+                        None
+                    }
+                })
+                .collect(),
         }
     }
 
@@ -245,6 +277,13 @@ impl ClusterSequence {
     }
 
     pub fn exclusive_jets_up_to(&self, n_jets: usize) -> Vec<&PseudoJet> {
+        // warnings for exclusive jets using algorithms that don't support it explicitly.
+        if self.jetdef.algorithm != Algorithm::Cambridge && self.jetdef.algorithm != Algorithm::Kt {
+            warn!(
+                "dcut and exclusive jets for jet-finders other than kt, C/A or genkt with p>=0 should be interpreted with care."
+            );
+        }
+        
         // recombining jets means we lose on jet each merge
         // idx in histortical clusterings to stop on
         let mut stop_idx = 2 * self.init_n - n_jets;
@@ -280,11 +319,11 @@ impl ClusterSequence {
         // set brief jet info
         // TODO; prolly will change when multithreading because of iterator and vec push
         self.particles.iter().enumerate().for_each(|(i, jet)| {
-            let kt2 = *jet.kt2();
+            let kt2 = ClusterSequence::jet_scale_for_algorithm(jet, &self.jetdef.algorithm);
             let bj = BriefJet {
                 eta: *(jet.rap()),
                 phi: *(jet.phi()),
-                kt2: if kt2 > 1e-300 { 1. / kt2 } else { 1e300 }, //TODO: implement jet_scale_for_algorithm
+                kt2,
                 _jets_index: i,
                 nn_dist: self.r2,
                 nn_jet_index: None,
@@ -426,11 +465,11 @@ impl ClusterSequence {
         let new_jet = self
             .jetdef
             .recombine(&self.particles[jet_a_idx], &self.particles[jet_b_idx]);
-        let kt2 = *new_jet.kt2();
+        let kt2 = ClusterSequence::jet_scale_for_algorithm(&new_jet, &self.jetdef.algorithm);
         let new_bj = BriefJet {
             eta: *(new_jet.rap()),
             phi: *(new_jet.phi()),
-            kt2: if kt2 > 1e-300 { 1. / kt2 } else { 1e300 }, //TODO: implement jet_scale_for_algorithm
+            kt2,
             _jets_index: self.particles.len(),
             nn_dist: self.r2,
             nn_jet_index: None,

@@ -8,6 +8,7 @@ inherits = "release"
 debug = "line-tables-only"
 
 [dependencies]
+log = "0.4.29"
 
 [profile.release]
 codegen-units = 1
