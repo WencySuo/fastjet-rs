@@ -1,4 +1,5 @@
 use crate::constants::PI;
+use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct BriefJet {
@@ -20,7 +21,19 @@ pub struct BriefJet {
 // } //include linked lists for NN dist
 
 //empty struct for now
-pub struct TiledJet {}
+pub struct TiledJet {
+    pub eta: f64,
+    pub phi: f64,
+    pub kt2: f64,
+    pub nn_dist: f64, // either nn_dist == option, or only read dist if nn_jet != None
+    pub nn_jet_index: Option<usize>, //TODO: investigate if box is best way to do this
+    pub _jets_index: usize, // either index == option, or only read index if nn_jet != None
+    pub _tile_index: usize,
+    pub dij_posn: usize,
+    //Pointers to other Tiles
+    pub prev_tile: Rc<TiledJet>,
+    pub next_tile: Rc<TiledJet>,
+}
 
 impl BriefJet {
     // TODO: removed since not used yet

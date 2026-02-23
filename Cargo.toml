@@ -13,3 +13,9 @@ debug = "line-tables-only"
 codegen-units = 1
 lto = "thin"
 
+[[bench]]
+name = "benchmark"
+harness = false
+
+[dev-dependencies]
+criterion = "0.5.1"
