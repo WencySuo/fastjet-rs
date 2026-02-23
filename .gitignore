@@ -2,3 +2,4 @@
 /examples/debug
 /examples/.rustc_info.json
 /.zed
+.DS_Store
