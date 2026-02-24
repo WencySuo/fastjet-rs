@@ -9,12 +9,7 @@ use std::io::stdout;
 use std::io::{BufRead, BufReader};
 use std::io::{BufWriter, Write};
 
-use std::time::SystemTime;
-
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-    //TODO: prolly optimize reading lol
-    //
-    let now = SystemTime::now();
 
     let file = File::open("./examples/data/single-event.dat")?;
     let mut reader = BufReader::new(file);
@@ -35,8 +30,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         line.clear();
     }
 
-    //TODO: more default constructors
-
     //create jet def
     let _r: f64 = 0.6;
     let jet_def = JetDefinition::new(
@@ -44,19 +37,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         0.6,
         RecombinationScheme::EScheme,
         Strategy::N2Plain,
+        None, // no need for extra parameters with AntiKt
     );
 
     let mut clust_seq = ClusterSequence::new(input_particles, jet_def);
-
     clust_seq.initialize_and_run_no_decant();
-
     let pmin = 5.0;
-
     let mut inclusive_jets: Vec<&PseudoJet> = clust_seq.inclusive_jets(pmin);
-
     let inclusive_jets: &mut Vec<&PseudoJet> = PseudoJet::sorted_by_pt(&mut inclusive_jets);
-
-    println!("Time elapse is {:?}", now.elapsed());
+    
 
     let stdout = stdout();
     let mut out = BufWriter::new(stdout.lock());
@@ -67,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "jet #", "rapiddity", "phi", "pt"
     )?;
 
-    for (i, jet) in inclusive_jets.iter_mut().enumerate() {
+    for (i, jet) in inclusive_jets.iter().enumerate() {
         writeln!(
             out,
             "{:>5} {:>15.8} {:>15.8} {:>15.8}",
