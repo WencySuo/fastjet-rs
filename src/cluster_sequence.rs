@@ -1,8 +1,11 @@
 use log::warn;
 use std::panic;
 
+use crate::constants::PI;
 use crate::proxy_jet::BriefJet;
 use crate::proxy_jet::ProxyJet;
+use crate::proxy_jet::Tile;
+//use crate::proxy_jet::TiledJet;
 use crate::pseudo_jet::PseudoJet;
 
 // TODO: add automatic strategies for clustering like BEST: N2Plain, N2Tiling
@@ -13,6 +16,15 @@ pub struct ClusterSequence {
     r2: f64,
     _history: Vec<HistoryElement>,
     init_n: usize,
+    //TODO: find if we can move tiled jets related vars out of here
+    _tiles: Vec<Tile>,
+    _tiles_eta_min: f64,
+    _tiles_eta_max: f64,
+    _tile_size_eta: f64,
+    _tile_size_phi: f64,
+    _n_tiles_phi: isize,
+    _tiles_ieta_min: isize,
+    _tiles_ieta_max: isize,
 }
 
 pub struct JetDefinition {
@@ -117,6 +129,15 @@ impl ClusterSequence {
             r2,
             _history,
             init_n,
+            //TODO: remvoe all this goofy ahh inits
+            _tiles: Vec::new(),
+            _tiles_eta_min: 0.0,
+            _tiles_eta_max: 0.0,
+            _tile_size_eta: 0.0,
+            _tile_size_phi: 0.0,
+            _n_tiles_phi: 0,
+            _tiles_ieta_min: 0,
+            _tiles_ieta_max: 0,
         };
 
         clust_seq.fill_init_history();
@@ -146,7 +167,7 @@ impl ClusterSequence {
                 // TODO: figure out if there's a better way to handle this
                 if p <= 0.0 && kt2 < 1e-300 {
                     kt2 = 1e-300;
-                } 
+                }
                 kt2.powf(p)
             }
         }
@@ -175,6 +196,7 @@ impl ClusterSequence {
                 self.simple_n2_cluster();
             }
             Strategy::N2Tiling => {
+                self.tiled_n2_cluster();
                 //TODO: implement N2Tiling strategy
             } // _ => {
               //     panic!("Unsupported strategy");
@@ -330,6 +352,235 @@ impl ClusterSequence {
         out
     }
 
+    //TODO: in fastjet this is a seperate class so should probably move also
+    pub fn min_max_rap(&self) -> (f64, f64, f64) {
+        //TODO why are these magic numbers here???
+        // seems like its the max nrap binning we want to consider?
+        // in this config each bin has width of 1 rap
+        let nrap = 20;
+        let nbins = nrap * 2;
+
+        let mut min_rap = f64::MAX;
+        let mut max_rap = -f64::MAX;
+
+        let mut counts = vec![0; nbins];
+
+        let mut ubin: usize;
+        for particle in &self.particles {
+            //when rap is infinity then ignore the particle
+            if particle.E() == particle.pz().abs() {
+                continue;
+            }
+            let rap = *particle.rap();
+            if rap < min_rap {
+                min_rap = rap;
+            }
+            if rap > max_rap {
+                max_rap = rap;
+            }
+
+            //TODO: check if all this casting is best
+            // rap will be a float so cast to i64 for binning
+            let ibin = rap as i64 + nrap as i64;
+            //the leftmost and rightmost bins will be used for overflow
+            // thus bin =0 goes from [-infty, -19] and bin=39 [20, infty]
+            if ibin < 0 {
+                ubin = 0;
+            } else if ibin >= nbins as i64 {
+                ubin = nbins - 1;
+            } else {
+                ubin = ibin as usize;
+            }
+            counts[ubin] += 1;
+        }
+
+        //given all binning find count of busiest bin
+        // particles will never be empty so just unwrap
+        let busiest_bin = counts.iter().max().unwrap();
+
+        //more magic numbers
+
+        let allowed_max_fraction: f64 = 0.25;
+        let min_multiplicity: f64 = 4.0;
+
+        //find how much we can stuff in edge bins
+        let mut allowed_max_cumul = min_multiplicity
+            .max(*busiest_bin as f64 * allowed_max_fraction)
+            .floor();
+
+        // chance min_mult is more than busiest bin count
+        // in which case allowed_max_cumul should not be greater than busiest bin count
+        if allowed_max_cumul > *busiest_bin as f64 {
+            allowed_max_cumul = *busiest_bin as f64;
+        }
+
+        // scan rap bins from left to find min rap for our tiling
+        let mut cum_lo = 0.0;
+        let mut cumul_2 = 0.0; //some internal variable class
+        ubin = 0;
+        for i in 0..nbins {
+            cum_lo += counts[i] as f64;
+            if cum_lo >= allowed_max_cumul {
+                let y = (i - nrap) as f64;
+                if y > min_rap {
+                    min_rap = y;
+                    ubin = i;
+                }
+                break;
+            }
+        }
+        //TODO prolly add an assert that we actally found a bin
+        assert!(ubin != nbins);
+
+        cumul_2 += cum_lo * cum_lo;
+
+        let ibin_lo = ubin;
+
+        let mut cum_hi = 0.0;
+
+        // do same as right except from hi to lo
+        ubin = 0;
+        for i in (0..nbins).rev() {
+            cum_hi += counts[i] as f64;
+            if cum_hi >= allowed_max_cumul {
+                //RHS side of last bin
+                let y = (i - nrap + 1) as f64;
+                if y < max_rap {
+                    max_rap = y;
+                    ubin = i;
+                }
+                break;
+            }
+        }
+
+        assert!(ubin != 0);
+
+        let ibin_hi = ubin;
+
+        assert!(ibin_hi >= ibin_lo);
+
+        //cumul2 is the sum of all contents
+        if ibin_lo == ibin_hi {
+            cumul_2 = (cum_lo + cum_hi - counts[ibin_lo] as f64).powi(2);
+        } else {
+            cumul_2 += cum_hi * cum_hi;
+            //find rest of bins
+            for i in ibin_lo + 1..ibin_hi {
+                cumul_2 += counts[i] as f64 * counts[i] as f64;
+            }
+        }
+
+        (min_rap, max_rap, cumul_2)
+    }
+
+    //----------------------------------------------------------------------
+    /// Set up the tiles:
+    ///  - decide the range in eta
+    ///  - allocate the tiles
+    ///  - set up the cross-referencing info between tiles
+    ///
+    /// The neighbourhood of a tile is set up as follows
+    ///
+    /// 	      LRR
+    ///           LXR
+    ///           LLR
+    ///
+    /// such that tiles is an array containing XLLLLRRRR with pointers
+    ///                                         |   \ RH_tiles
+    ///                                         \ surrounding_tiles
+    ///
+    /// with appropriate precautions when close to the edge of the tiled
+    /// region.
+    ///
+    //setup correct tile size and point tiles to their neighbors
+    pub fn initialize_tiles(&mut self) {
+        // want to bound this for very low DeltaR to avoid memory blow ups
+        let default_tile_size: f64 = self.jetdef.r.max(0.1);
+        self._tile_size_eta = default_tile_size;
+
+        // for phi we need to check spacing against 2pi
+        // when phi is <3 no tiling is done so min = 3
+        self._n_tiles_phi = ((PI * 2.0 / default_tile_size).floor() as isize).max(3);
+        self._tile_size_phi = PI * 2.0 / self._n_tiles_phi as f64;
+
+        // find the min and max rap/eta that we should be using for this analysis
+        let (min_rap, max_rap, _cumul_2) = self.min_max_rap();
+
+        //find min/max values for these tiles and figure out why _tiles_eta_min isnt just min_rap?
+        self._tiles_ieta_min = (min_rap / self._tile_size_eta).floor() as isize;
+        self._tiles_ieta_max = (max_rap / self._tile_size_eta).floor() as isize;
+        self._tiles_eta_min = self._tiles_ieta_min as f64 * self._tile_size_eta;
+        self._tiles_eta_max = self._tiles_ieta_max as f64 * self._tile_size_eta;
+
+        // allocate the vector for the size of tiles before pushing
+        // TODO: figure out how to access internal _tiles struct with object
+        // (should it just be defined as TiledJet object and no trait for PseudoJet)
+        // TODO: C++ code does not need to init vectors to get pointers could be perf loss
+        let mut tiles: Vec<Tile> = Vec::new();
+        tiles.resize(
+            (self._tiles_ieta_max - self._tiles_ieta_min + 1) as usize * self._n_tiles_phi as usize,
+            Tile::new(),
+        );
+
+        // now link all these tiles together
+        for ieta in self._tiles_ieta_min..self._tiles_ieta_max {
+            for iphi in 0..self._n_tiles_phi {
+                let mut tile_idx = 0;
+                let tile: &mut Tile = &mut tiles[self._tile_index(ieta, iphi)];
+                // first tile has no HEAD
+                tile.head = Option::None;
+
+                //begin_tiles ppoints to neighboring tiles including itself?
+                tile.begin_tiles[tile_idx] = self._tile_index(ieta, iphi);
+
+                // the surrounding tiles excludes self
+                // can just use slices in rust
+                tile_idx += 1;
+                //tile.surrounding_tiles = &tile.begin_tiles[tile_idx..];
+
+                // after first loop of ieta we can now check prev column
+                // now left right middle
+                if ieta > self._tiles_ieta_min {
+                    for idphi in [-1isize, 0, 1] {
+                        tile_idx += 1;
+                        tile.begin_tiles[tile_idx] = self._tile_index(ieta - 1, iphi + idphi);
+                    }
+                }
+
+                // note: phi doesnt need bound checks since it mod 2pi
+                // LHS includes under curr elem
+                tile_idx += 1;
+                tile.begin_tiles[tile_idx] = self._tile_index(ieta, iphi - 1);
+
+                // first RHS is above curr elem
+                tile_idx += 1;
+                tile.begin_tiles[tile_idx] = self._tile_index(ieta, iphi + 1);
+
+                // only set last R if we are not at max
+                if ieta < self._tiles_ieta_max {
+                    for idphi in [-1isize, 0, 1] {
+                        tile_idx += 1;
+                        tile.begin_tiles[tile_idx] = self._tile_index(ieta + 1, iphi + idphi);
+                    }
+                }
+
+                // TODO: since i think this is unitialized in prev config , aka at correct points
+                // check if this does not have runtime errors?
+                tile.surrounding_tiles = 1..5;
+                tile.rh_tiles = 5..9;
+            }
+        }
+    }
+
+    // get index even if iphi is negative since wraparound
+    fn _tile_index(&self, ieta: isize, iphi: isize) -> usize {
+        // use mod to get wraparound behavior but -1 mod n is == -1 so add by n
+        ((ieta - self._tiles_ieta_min) * self._n_tiles_phi
+            + ((iphi + self._n_tiles_phi) % self._n_tiles_phi)) as usize
+    }
+
+    pub fn tiled_n2_cluster(&mut self) {}
+
     pub fn simple_n2_cluster(&mut self) {
         let n = self.particles.len();
 
@@ -338,7 +589,11 @@ impl ClusterSequence {
         // set brief jet info
         // TODO; prolly will change when multithreading because of iterator and vec push
         self.particles.iter().enumerate().for_each(|(i, jet)| {
-            let kt2 = ClusterSequence::jet_scale_for_algorithm(jet, &self.jetdef.algorithm, self.jetdef.extra_param);
+            let kt2 = ClusterSequence::jet_scale_for_algorithm(
+                jet,
+                &self.jetdef.algorithm,
+                self.jetdef.extra_param,
+            );
             let bj = BriefJet {
                 eta: *(jet.rap()),
                 phi: *(jet.phi()),
@@ -484,7 +739,11 @@ impl ClusterSequence {
         let new_jet = self
             .jetdef
             .recombine(&self.particles[jet_a_idx], &self.particles[jet_b_idx]);
-        let kt2 = ClusterSequence::jet_scale_for_algorithm(&new_jet, &self.jetdef.algorithm, self.jetdef.extra_param);
+        let kt2 = ClusterSequence::jet_scale_for_algorithm(
+            &new_jet,
+            &self.jetdef.algorithm,
+            self.jetdef.extra_param,
+        );
         let new_bj = BriefJet {
             eta: *(new_jet.rap()),
             phi: *(new_jet.phi()),

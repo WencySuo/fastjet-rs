@@ -35,6 +35,25 @@ pub struct TiledJet {
     pub next_tile: Rc<TiledJet>,
 }
 
+#[derive(Clone)]
+pub struct Tile {
+    pub begin_tiles: [usize; 9],
+    pub surrounding_tiles: std::ops::Range<usize>,
+    pub rh_tiles: std::ops::Range<usize>,
+    pub head: Option<usize>, // index of TiledJet
+}
+
+impl Tile {
+    pub fn new() -> Self {
+        Tile {
+            begin_tiles: [0; 9],
+            surrounding_tiles: 0..0,
+            rh_tiles: 0..0,
+            head: None,
+        }
+    }
+}
+
 impl BriefJet {
     // TODO: removed since not used yet
     // fn new(eta: f64, phi: f64, kt2: f64, _r2: f64) -> Self {
