@@ -1,11 +1,13 @@
 use log::warn;
+use std::cell::RefCell;
 use std::panic;
+use std::rc::Rc;
 
 use crate::constants::PI;
 use crate::proxy_jet::BriefJet;
 use crate::proxy_jet::ProxyJet;
 use crate::proxy_jet::Tile;
-//use crate::proxy_jet::TiledJet;
+use crate::proxy_jet::TiledJet;
 use crate::pseudo_jet::PseudoJet;
 
 // TODO: add automatic strategies for clustering like BEST: N2Plain, N2Tiling
@@ -17,6 +19,11 @@ pub struct ClusterSequence {
     _history: Vec<HistoryElement>,
     init_n: usize,
     //TODO: find if we can move tiled jets related vars out of here
+    tiles_struct: ClusterSequenceTiles,
+}
+
+#[derive(Default)]
+pub struct ClusterSequenceTiles {
     _tiles: Vec<Tile>,
     _tiles_eta_min: f64,
     _tiles_eta_max: f64,
@@ -129,15 +136,7 @@ impl ClusterSequence {
             r2,
             _history,
             init_n,
-            //TODO: remvoe all this goofy ahh inits
-            _tiles: Vec::new(),
-            _tiles_eta_min: 0.0,
-            _tiles_eta_max: 0.0,
-            _tile_size_eta: 0.0,
-            _tile_size_phi: 0.0,
-            _n_tiles_phi: 0,
-            _tiles_ieta_min: 0,
-            _tiles_ieta_max: 0,
+            tiles_struct: ClusterSequenceTiles::default(),
         };
 
         clust_seq.fill_init_history();
@@ -487,21 +486,25 @@ impl ClusterSequence {
     pub fn initialize_tiles(&mut self) {
         // want to bound this for very low DeltaR to avoid memory blow ups
         let default_tile_size: f64 = self.jetdef.r.max(0.1);
-        self._tile_size_eta = default_tile_size;
+        self.tiles_struct._tile_size_eta = default_tile_size;
 
         // for phi we need to check spacing against 2pi
         // when phi is <3 no tiling is done so min = 3
-        self._n_tiles_phi = ((PI * 2.0 / default_tile_size).floor() as isize).max(3);
-        self._tile_size_phi = PI * 2.0 / self._n_tiles_phi as f64;
+        self.tiles_struct._n_tiles_phi = ((PI * 2.0 / default_tile_size).floor() as isize).max(3);
+        self.tiles_struct._tile_size_phi = PI * 2.0 / self.tiles_struct._n_tiles_phi as f64;
 
         // find the min and max rap/eta that we should be using for this analysis
         let (min_rap, max_rap, _cumul_2) = self.min_max_rap();
 
         //find min/max values for these tiles and figure out why _tiles_eta_min isnt just min_rap?
-        self._tiles_ieta_min = (min_rap / self._tile_size_eta).floor() as isize;
-        self._tiles_ieta_max = (max_rap / self._tile_size_eta).floor() as isize;
-        self._tiles_eta_min = self._tiles_ieta_min as f64 * self._tile_size_eta;
-        self._tiles_eta_max = self._tiles_ieta_max as f64 * self._tile_size_eta;
+        self.tiles_struct._tiles_ieta_min =
+            (min_rap / self.tiles_struct._tile_size_eta).floor() as isize;
+        self.tiles_struct._tiles_ieta_max =
+            (max_rap / self.tiles_struct._tile_size_eta).floor() as isize;
+        self.tiles_struct._tiles_eta_min =
+            self.tiles_struct._tiles_ieta_min as f64 * self.tiles_struct._tile_size_eta;
+        self.tiles_struct._tiles_eta_max =
+            self.tiles_struct._tiles_ieta_max as f64 * self.tiles_struct._tile_size_eta;
 
         // allocate the vector for the size of tiles before pushing
         // TODO: figure out how to access internal _tiles struct with object
@@ -509,20 +512,21 @@ impl ClusterSequence {
         // TODO: C++ code does not need to init vectors to get pointers could be perf loss
         let mut tiles: Vec<Tile> = Vec::new();
         tiles.resize(
-            (self._tiles_ieta_max - self._tiles_ieta_min + 1) as usize * self._n_tiles_phi as usize,
+            (self.tiles_struct._tiles_ieta_max - self.tiles_struct._tiles_ieta_min + 1) as usize
+                * self.tiles_struct._n_tiles_phi as usize,
             Tile::new(),
         );
 
         // now link all these tiles together
-        for ieta in self._tiles_ieta_min..self._tiles_ieta_max {
-            for iphi in 0..self._n_tiles_phi {
+        for ieta in self.tiles_struct._tiles_ieta_min..self.tiles_struct._tiles_ieta_max {
+            for iphi in 0..self.tiles_struct._n_tiles_phi {
                 let mut tile_idx = 0;
-                let tile: &mut Tile = &mut tiles[self._tile_index(ieta, iphi)];
+                let tile: &mut Tile = &mut tiles[self._tile_int_index(ieta, iphi)];
                 // first tile has no HEAD
                 tile.head = Option::None;
 
                 //begin_tiles ppoints to neighboring tiles including itself?
-                tile.begin_tiles[tile_idx] = self._tile_index(ieta, iphi);
+                tile.begin_tiles[tile_idx] = self._tile_int_index(ieta, iphi);
 
                 // the surrounding tiles excludes self
                 // can just use slices in rust
@@ -531,32 +535,34 @@ impl ClusterSequence {
 
                 // after first loop of ieta we can now check prev column
                 // now left right middle
-                if ieta > self._tiles_ieta_min {
+                if ieta > self.tiles_struct._tiles_ieta_min {
                     for idphi in [-1isize, 0, 1] {
                         tile_idx += 1;
-                        tile.begin_tiles[tile_idx] = self._tile_index(ieta - 1, iphi + idphi);
+                        tile.begin_tiles[tile_idx] = self._tile_int_index(ieta - 1, iphi + idphi);
                     }
                 }
 
                 // note: phi doesnt need bound checks since it mod 2pi
                 // LHS includes under curr elem
                 tile_idx += 1;
-                tile.begin_tiles[tile_idx] = self._tile_index(ieta, iphi - 1);
+                tile.begin_tiles[tile_idx] = self._tile_int_index(ieta, iphi - 1);
 
                 // first RHS is above curr elem
                 tile_idx += 1;
-                tile.begin_tiles[tile_idx] = self._tile_index(ieta, iphi + 1);
+                tile.begin_tiles[tile_idx] = self._tile_int_index(ieta, iphi + 1);
 
                 // only set last R if we are not at max
-                if ieta < self._tiles_ieta_max {
+                if ieta < self.tiles_struct._tiles_ieta_max {
                     for idphi in [-1isize, 0, 1] {
                         tile_idx += 1;
-                        tile.begin_tiles[tile_idx] = self._tile_index(ieta + 1, iphi + idphi);
+                        tile.begin_tiles[tile_idx] = self._tile_int_index(ieta + 1, iphi + idphi);
                     }
                 }
 
                 // TODO: since i think this is unitialized in prev config , aka at correct points
                 // check if this does not have runtime errors?
+                // TODO: this is not fully defined to be these constants since need to accound for when
+                // ieta > self._tiles_ieta_min  and when ieta < self._tiles_ieta_max
                 tile.surrounding_tiles = 1..5;
                 tile.rh_tiles = 5..9;
             }
@@ -564,14 +570,154 @@ impl ClusterSequence {
     }
 
     // get index even if iphi is negative since wraparound
-    fn _tile_index(&self, ieta: isize, iphi: isize) -> usize {
+    fn _tile_int_index(&self, ieta: isize, iphi: isize) -> usize {
         // use mod to get wraparound behavior but -1 mod n is == -1 so add by n
-        ((ieta - self._tiles_ieta_min) * self._n_tiles_phi
-            + ((iphi + self._n_tiles_phi) % self._n_tiles_phi)) as usize
+        ((ieta - self.tiles_struct._tiles_ieta_min) * self.tiles_struct._n_tiles_phi
+            + ((iphi + self.tiles_struct._n_tiles_phi) % self.tiles_struct._n_tiles_phi))
+            as usize
     }
 
-    pub fn tiled_n2_cluster(&mut self) {}
+    fn _tile_index(&self, eta: f64, phi: f64) -> usize {
+        let mut ieta: isize;
+        let iphi: isize;
 
+        //bound eta into an int
+        if eta <= self.tiles_struct._tiles_eta_min {
+            ieta = 0;
+        } else if eta >= self.tiles_struct._tiles_eta_max {
+            // this diff is the full range of ieta why not just use ntiles eta???
+            // idk you tell me
+            ieta = self.tiles_struct._tiles_ieta_max - self.tiles_struct._tiles_ieta_min;
+        } else {
+            ieta = ((eta - self.tiles_struct._tiles_eta_min) / self.tiles_struct._tile_size_eta)
+                as isize;
+            //protect against casting
+            if ieta > self.tiles_struct._tiles_ieta_max - self.tiles_struct._tiles_ieta_min {
+                ieta = self.tiles_struct._tiles_ieta_max - self.tiles_struct._tiles_ieta_min
+            }
+        };
+
+        iphi = ((phi + 2.0 * PI) / self.tiles_struct._tile_size_phi) as isize
+            % self.tiles_struct._n_tiles_phi;
+        (iphi + ieta * self.tiles_struct._n_tiles_phi) as usize
+    }
+
+    pub fn _tj_set_jetinfo(
+        &self,
+        tiles: &mut Vec<Tile>,
+        jet: &PseudoJet,
+        i: usize,
+    ) -> Rc<RefCell<TiledJet>> {
+        //empty for now until WS implements and to prevent compiler screaming correct code below
+        //let jet: Rc<RefCell<TiledJet>> = Rc::new(RefCell::new(self.bj_setinfo(jet, i)));
+        let jet: Rc<RefCell<TiledJet>> = Rc::new(RefCell::new(TiledJet::default()));
+        //TODO: this seems pretty sketch but at this point no other references should have mut access
+        // or even ref to data
+        jet.borrow_mut().tile_index = self._tile_index(jet.borrow().eta(), jet.borrow().phi());
+        let tile_index = jet.borrow().tile_index;
+
+        // need to add jet pointer to linked List of jets
+        let tile = &mut tiles[tile_index];
+        jet.borrow_mut().prev_jet = Option::None;
+        jet.borrow_mut().next_jet = tile.head.clone();
+        if jet.borrow().next_jet.is_some() {
+            let next = tile.head.as_ref().unwrap();
+            next.borrow_mut().prev_jet = Some(Rc::clone(&jet));
+        }
+
+        tile.head = Some(Rc::clone(&jet));
+        jet
+    }
+
+    pub fn tiled_n2_cluster(&mut self) {
+        //now we follow similar patterns to simple_n2_cluster
+        self.initialize_tiles();
+
+        let n = self.particles.len();
+
+        let mut bj_jets: Vec<Rc<RefCell<TiledJet>>> = Vec::with_capacity(n);
+
+        // TODO find out what tile union does lmao
+        // TODO set constant for n_tile neighbors which is NINE
+        let mut tile_union: Vec<usize> = Vec::with_capacity(3 * 9);
+
+        // Move tiles out so we don't hold a &mut borrow into self while calling methods on self
+        // TODO: there is some funky self borrow checker stuff when setting info
+        // because moving entire struct this should be solved once we move things like tile_index
+        // into its own class relying only on ClusterSequenceTiles
+        let mut tiles = std::mem::take(&mut self.tiles_struct._tiles);
+        let particles = &self.particles;
+
+        //set bj info for all tiles
+        for (i, jet) in particles.iter().enumerate() {
+            bj_jets.push(self._tj_set_jetinfo(&mut tiles, jet, i));
+        }
+
+        self.tiles_struct._tiles = tiles;
+
+        // now set up all NN info, looping through tiles and their neighbors
+
+        self.tiles_struct._tiles.iter().for_each(|tile| {
+            // N2 loop over all NN setting their bj_dist
+            // cloning here is proper since its just an Rc but most likely hurt perf
+            let mut jet_a_next = tile.head.clone();
+            while let Some(jet_a) = jet_a_next {
+                //jet_a cannot be null
+                let mut jet_b_next = tile.head.clone();
+                while let Some(jet_b) = jet_b_next
+                    && Rc::ptr_eq(&jet_a, &jet_b)
+                {
+                    // TODO add _bj_dist to tiledJet impl placeholder for now
+                    // BriefJet::_bj_dist(jet_a.borrow(), jet_b.borrow());
+                    let dist = 0.0;
+                    if dist < jet_a.borrow().nn_dist {
+                        jet_a.borrow_mut().nn_dist = dist;
+                        jet_a.borrow_mut().nn_jet_index = jet_b.borrow().nn_jet_index;
+                    }
+                    if dist < jet_b.borrow().nn_dist {
+                        jet_b.borrow_mut().nn_dist = dist;
+                        jet_b.borrow_mut().nn_jet_index = jet_a.borrow().nn_jet_index;
+                    }
+                    jet_b_next = jet_a.borrow().next_jet.clone();
+                }
+                // cloning here is proper since its just an Rc but also slow
+                jet_a_next = jet_a.borrow().next_jet.clone();
+            }
+            // now we need to do it for the RH tiles since a NN might lie there for this tile
+            // we do not check the LH tiles since these should already be computed by the prev
+            // tile loop
+            //TODO rh tiles may not be range in future impl on beginning tiles
+            for rh_tile_idx in tile.rh_tiles.start..tile.rh_tiles.end {
+                // rh tile should never be None
+                let rh_tile = &self.tiles_struct._tiles[rh_tile_idx];
+                // do another loop over all tiles
+                let mut jet_a_next = tile.head.clone();
+                while let Some(jet_a) = jet_a_next {
+                    // now we loop over all RH tile jets
+                    let mut jet_b_next = rh_tile.head.clone();
+                    while let Some(jet_b) = jet_b_next {
+                        // TODO add _bj_dist to tiledJet impl placeholder for now
+                        // BriefJet::_bj_dist(jet_a.borrow(), jet_b.borrow());
+                        let dist = 0.0;
+                        if dist < jet_a.borrow().nn_dist {
+                            jet_a.borrow_mut().nn_dist = dist;
+                            jet_a.borrow_mut().nn_jet_index = jet_b.borrow().nn_jet_index;
+                        }
+                        if dist < jet_b.borrow().nn_dist {
+                            jet_b.borrow_mut().nn_dist = dist;
+                            jet_b.borrow_mut().nn_jet_index = jet_a.borrow().nn_jet_index;
+                        }
+                        jet_b_next = jet_a.borrow().next_jet.clone();
+                    }
+                    jet_a_next = jet_a.borrow().next_jet.clone();
+                }
+            }
+        })
+
+        // now we want to create the DiJ distance metric where NN is J
+    }
+
+    // TODO: change from briefjets to generic ProxyJet class
     pub fn simple_n2_cluster(&mut self) {
         let n = self.particles.len();
 
@@ -585,6 +731,7 @@ impl ClusterSequence {
                 &self.jetdef.algorithm,
                 self.jetdef.extra_param,
             );
+            //TODO change to BJ set info for generics
             let bj = BriefJet {
                 eta: *(jet.rap()),
                 phi: *(jet.phi()),

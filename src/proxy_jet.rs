@@ -1,4 +1,5 @@
 use crate::constants::PI;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -21,6 +22,7 @@ pub struct BriefJet {
 // } //include linked lists for NN dist
 
 //empty struct for now
+#[derive(Default)]
 pub struct TiledJet {
     pub eta: f64,
     pub phi: f64,
@@ -28,11 +30,11 @@ pub struct TiledJet {
     pub nn_dist: f64, // either nn_dist == option, or only read dist if nn_jet != None
     pub nn_jet_index: Option<usize>, //TODO: investigate if box is best way to do this
     pub _jets_index: usize, // either index == option, or only read index if nn_jet != None
-    pub _tile_index: usize,
+    pub tile_index: usize,
     pub dij_posn: usize,
-    //Pointers to other Tiles
-    pub prev_tile: Rc<TiledJet>,
-    pub next_tile: Rc<TiledJet>,
+    //Pointers to other jets
+    pub prev_jet: Option<Rc<RefCell<TiledJet>>>,
+    pub next_jet: Option<Rc<RefCell<TiledJet>>>,
 }
 
 #[derive(Clone)]
@@ -40,7 +42,7 @@ pub struct Tile {
     pub begin_tiles: [usize; 9],
     pub surrounding_tiles: std::ops::Range<usize>,
     pub rh_tiles: std::ops::Range<usize>,
-    pub head: Option<usize>, // index of TiledJet
+    pub head: Option<Rc<RefCell<TiledJet>>>, // need rc to make linked lists of jets
 }
 
 impl Tile {
@@ -51,6 +53,65 @@ impl Tile {
             rh_tiles: 0..0,
             head: None,
         }
+    }
+}
+
+impl ProxyJet for TiledJet {
+    fn eta(&self) -> f64 {
+        self.eta
+    }
+
+    #[inline]
+    fn phi(&self) -> f64 {
+        self.phi
+    }
+
+    #[inline]
+    fn kt2(&self) -> f64 {
+        self.kt2
+    }
+
+    #[inline]
+    fn nn_dist(&self) -> f64 {
+        self.nn_dist
+    }
+
+    fn create_jet_type(&'_ self) -> JetType<'_> {
+        JetType::TiledJetType(self)
+    }
+
+    #[inline]
+    fn nn_jet_index(&self) -> Option<usize> {
+        self.nn_jet_index
+    }
+
+    #[inline]
+    fn set_nn_dist(&mut self, dist: f64) {
+        self.nn_dist = dist;
+    }
+
+    #[inline]
+    fn set_nn_jet(&mut self, jet_index: Option<usize>) {
+        self.nn_jet_index = jet_index;
+    }
+
+    #[inline]
+    fn _bj_dist<J: ProxyJet>(jet_a: &J, jet_b: &J) -> f64 {
+        let dphi: f64 = PI - f64::abs(PI - f64::abs(jet_a.phi() - jet_b.phi()));
+        let deta: f64 = jet_a.eta() - jet_b.eta();
+        dphi * dphi + deta * deta
+    }
+
+    #[inline]
+    fn _bj_dij<J: ProxyJet>(jet: &J, jets: &[J]) -> f64 {
+        let mut kt2 = jet.kt2();
+        if let Some(index) = jet.nn_jet_index() {
+            let kt2_b = jets[index].kt2();
+            if kt2_b < kt2 {
+                kt2 = kt2_b;
+            }
+        }
+        jet.nn_dist() * kt2
     }
 }
 
@@ -130,7 +191,7 @@ pub trait ProxyJet {
 
 pub enum JetType<'a> {
     BriefJetType(&'a BriefJet),
-    TiledJetType(TiledJet),
+    TiledJetType(&'a TiledJet),
 }
 
 impl ProxyJet for BriefJet {
