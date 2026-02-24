@@ -20,6 +20,7 @@ pub struct JetDefinition {
     pub r: f64,
     pub scheme: RecombinationScheme,
     pub strategy: Strategy,
+    pub extra_param: Option<f64>,
 }
 
 pub enum Strategy {
@@ -34,6 +35,7 @@ pub enum Algorithm {
     AntiKt,
     Kt,
     Cambridge,
+    Genkt,
 }
 
 pub enum RecombinationScheme {
@@ -49,12 +51,14 @@ impl JetDefinition {
         r: f64,
         scheme: RecombinationScheme,
         strategy: Strategy,
+        extra_param: Option<f64>,
     ) -> Self {
         JetDefinition {
             algorithm,
             r,
             scheme,
             strategy,
+            extra_param,
         }
     }
 
@@ -86,7 +90,6 @@ pub const INVALID: usize = usize::MAX;
 pub const BEAMJET: usize = usize::MAX - 1;
 pub const INEXISTENT_PARENT: usize = usize::MAX - 2;
 
-#[allow(dead_code)]
 pub struct HistoryElement {
     parent1: usize,
     parent2: usize,
@@ -122,8 +125,12 @@ impl ClusterSequence {
     }
 
     #[inline]
-    fn jet_scale_for_algorithm(jet: &PseudoJet, algorithm: &Algorithm) -> f64 {
-        let kt2 = *jet.kt2();
+    fn jet_scale_for_algorithm(
+        jet: &PseudoJet,
+        algorithm: &Algorithm,
+        extra_param: Option<f64>,
+    ) -> f64 {
+        let mut kt2 = *jet.kt2();
         match algorithm {
             Algorithm::Kt => kt2,
             Algorithm::AntiKt => {
@@ -134,6 +141,14 @@ impl ClusterSequence {
                 }
             }
             Algorithm::Cambridge => 1.0,
+            Algorithm::Genkt => {
+                let p = extra_param.unwrap_or(0.0);
+                // TODO: figure out if there's a better way to handle this
+                if p <= 0.0 && kt2 < 1e-300 {
+                    kt2 = 1e-300;
+                } 
+                kt2.powf(p)
+            }
         }
     }
 
@@ -212,7 +227,7 @@ impl ClusterSequence {
                     })
                     .collect()
             }
-            Algorithm::AntiKt => self
+            Algorithm::Genkt | Algorithm::AntiKt => self
                 ._history
                 .iter()
                 .rev()
@@ -278,12 +293,16 @@ impl ClusterSequence {
 
     pub fn exclusive_jets_up_to(&self, n_jets: usize) -> Vec<&PseudoJet> {
         // warnings for exclusive jets using algorithms that don't support it explicitly.
-        if self.jetdef.algorithm != Algorithm::Cambridge && self.jetdef.algorithm != Algorithm::Kt {
+        let algorithm = &self.jetdef.algorithm;
+        if *algorithm != Algorithm::Cambridge
+            && *algorithm != Algorithm::Kt
+            && *algorithm != Algorithm::Genkt
+        {
             warn!(
                 "dcut and exclusive jets for jet-finders other than kt, C/A or genkt with p>=0 should be interpreted with care."
             );
         }
-        
+
         // recombining jets means we lose on jet each merge
         // idx in histortical clusterings to stop on
         let mut stop_idx = 2 * self.init_n - n_jets;
@@ -319,7 +338,7 @@ impl ClusterSequence {
         // set brief jet info
         // TODO; prolly will change when multithreading because of iterator and vec push
         self.particles.iter().enumerate().for_each(|(i, jet)| {
-            let kt2 = ClusterSequence::jet_scale_for_algorithm(jet, &self.jetdef.algorithm);
+            let kt2 = ClusterSequence::jet_scale_for_algorithm(jet, &self.jetdef.algorithm, self.jetdef.extra_param);
             let bj = BriefJet {
                 eta: *(jet.rap()),
                 phi: *(jet.phi()),
@@ -465,7 +484,7 @@ impl ClusterSequence {
         let new_jet = self
             .jetdef
             .recombine(&self.particles[jet_a_idx], &self.particles[jet_b_idx]);
-        let kt2 = ClusterSequence::jet_scale_for_algorithm(&new_jet, &self.jetdef.algorithm);
+        let kt2 = ClusterSequence::jet_scale_for_algorithm(&new_jet, &self.jetdef.algorithm, self.jetdef.extra_param);
         let new_bj = BriefJet {
             eta: *(new_jet.rap()),
             phi: *(new_jet.phi()),
