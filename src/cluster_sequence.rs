@@ -473,25 +473,16 @@ impl ClusterSequence {
         (min_rap, max_rap, cumul_2)
     }
 
-    //----------------------------------------------------------------------
-    /// Set up the tiles:
-    ///  - decide the range in eta
-    ///  - allocate the tiles
-    ///  - set up the cross-referencing info between tiles
+    /// The neighbourhood of a tile is set up as follows:
+    /// ```text
+    ///       LRR
+    ///       LXR
+    ///       LLR
     ///
-    /// The neighbourhood of a tile is set up as follows
-    ///
-    /// 	      LRR
-    ///           LXR
-    ///           LLR
-    ///
-    /// such that tiles is an array containing XLLLLRRRR with pointers
-    ///                                         |   \ RH_tiles
-    ///                                         \ surrounding_tiles
-    ///
-    /// with appropriate precautions when close to the edge of the tiled
-    /// region.
-    ///
+    /// tiles contains XLLLLRRRR with pointers
+    ///                     |   \ RH_tiles
+    ///                     \ surrounding_tiles
+    /// ```
     //setup correct tile size and point tiles to their neighbors
     pub fn initialize_tiles(&mut self) {
         // want to bound this for very low DeltaR to avoid memory blow ups
