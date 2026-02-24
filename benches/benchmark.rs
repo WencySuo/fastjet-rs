@@ -51,6 +51,7 @@ fn criterion_benchmark(c: &mut Criterion) {
                 0.6,
                 RecombinationScheme::EScheme,
                 Strategy::N2Plain,
+                None,
             );
 
             let mut clust_seq = ClusterSequence::new(input_particles.clone(), jet_def);
