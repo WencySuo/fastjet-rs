@@ -5,7 +5,7 @@ edition = "2024"
 authors = ["Jesus Fileto", "Wency Suo"]
 description = "A Rust implementation of the FastJet software package for jet finding."
 repository = "https://github.com/WencySuo/fastjet-rs"
-lisence = "GPL-2.0"
+license = "GPL-2.0"
 readme = "README.md"
 exclude = ["benches/*", "tests/*"]
 
