@@ -138,6 +138,76 @@ impl ProxyJet for TiledJet {
     }
 }
 
+//TODO remove the need for this class but needed for _bj_dij
+impl ProxyJet for Rc<RefCell<TiledJet>> {
+    #[inline]
+    fn kt2(&self) -> f64 {
+        self.borrow().kt2
+    }
+
+    #[inline]
+    fn jets_index(&self) -> usize {
+        self.borrow()._jets_index
+    }
+
+    #[inline]
+    fn nn_jet_index(&self) -> Option<usize> {
+        self.borrow().nn_jet_index
+    }
+
+    #[inline]
+    fn nn_dist(&self) -> f64 {
+        self.borrow().nn_dist
+    }
+
+    #[inline]
+    fn set_nn_dist(&mut self, dist: f64) {
+        self.borrow_mut().nn_dist = dist;
+    }
+
+    #[inline]
+    fn set_nn_jet(&mut self, jet_index: Option<usize>) {
+        self.borrow_mut().nn_jet_index = jet_index;
+    }
+
+    #[inline]
+    fn create_jet_type(&'_ self) -> JetType<'_> {
+        // JetType wants a &'a TiledJet, so borrow then return ref.
+        // IMPORTANT: This can't return a reference that outlives the borrow guard,
+        // so if you truly need JetType here, you’ll likely want to refactor JetType
+        // to own/carry Rc instead. If create_jet_type isn't used on tiled jets yet,
+        // you can `unimplemented!()` for now.
+        unimplemented!(
+            "JetType::TiledJetType requires a &'a TiledJet; refactor JetType or avoid this for Rc<RefCell<_>>"
+        );
+    }
+
+    #[inline]
+    fn _bj_dist(jet_a: &Self, jet_b: &Self) -> f64 {
+        let a = jet_a.borrow();
+        let b = jet_b.borrow();
+        TiledJet::_bj_dist(&a, &b)
+    }
+
+    fn _bj_set_jetinfo(index: usize, pseudo_jet: &PseudoJet, r2: f64, kt2: f64) -> Self {
+        Rc::new(RefCell::new(TiledJet::_bj_set_jetinfo(
+            index, pseudo_jet, r2, kt2,
+        )))
+    }
+
+    #[inline]
+    fn _bj_dij<J: ProxyJet>(jet: &J, jets: &[J]) -> f64 {
+        let mut kt2 = jet.kt2();
+        if let Some(index) = jet.nn_jet_index() {
+            let kt2_b = jets[index].kt2();
+            if kt2_b < kt2 {
+                kt2 = kt2_b;
+            }
+        }
+        jet.nn_dist() * kt2
+    }
+}
+
 impl BriefJet {
     // TODO: removed since not used yet
     // fn new(eta: f64, phi: f64, kt2: f64, _r2: f64) -> Self {

@@ -630,6 +630,38 @@ impl ClusterSequence {
         jet
     }
 
+    pub fn bj_remove_from_tiles(&mut self, jet: &Rc<RefCell<TiledJet>>) {
+        let tile = &mut self.tiles_struct._tiles[jet.borrow().tile_index];
+
+        // if prev is null then jet is head
+        // TODO: check if we really need to clone in both if lets
+        if let Some(ref prev) = jet.borrow().prev_jet {
+            // link prev pointer to next pointer to remove jet
+            prev.borrow_mut().next_jet = jet.borrow().next_jet.clone();
+        } else {
+            tile.head = jet.borrow().next_jet.clone();
+        }
+
+        if let Some(ref next) = jet.borrow().next_jet {
+            next.borrow_mut().prev_jet = jet.borrow().prev_jet.clone();
+        }
+
+        //TODO check if we need to drop jet that we just added?
+    }
+
+    // add all neighbors indices around tile_index to tile_union
+    pub fn _add_neighbors_to_tile_union(
+        &mut self,
+        tile_index: usize,
+        tile_union: &mut Vec<usize>,
+        n_near_tiles: &mut usize,
+    ) {
+        for near_tile_idx in self.tiles_struct._tiles[tile_index].begin_tiles {
+            tile_union[*n_near_tiles] = near_tile_idx;
+            *n_near_tiles += 1;
+        }
+    }
+
     pub fn tiled_n2_cluster(&mut self) {
         //now we follow similar patterns to simple_n2_cluster
         self.initialize_tiles();
@@ -713,9 +745,158 @@ impl ClusterSequence {
                     jet_a_next = jet_a.borrow().next_jet.clone();
                 }
             }
-        })
+        });
 
         // now we want to create the DiJ distance metric where NN is J
+        // this is easy since all the info is already computed prev
+        // just loop over all jets
+        // TODO fix this goofy ProxyJet shenanigans
+        let mut di_j: Vec<f64> = vec![0.0; n];
+        di_j.iter_mut().enumerate().for_each(|(i, jet)| {
+            *jet = <Rc<RefCell<TiledJet>> as ProxyJet>::_bj_dij(&bj_jets[i], &bj_jets);
+        });
+
+        //start recombination loop
+        for i in 0..n {
+            let end_idx = n - 1 - i;
+            let mut min_idx = 0;
+            let mut min_dij = di_j[0];
+            for (k, jet) in di_j.iter().enumerate().take(end_idx + 1).skip(1) {
+                if *jet < min_dij {
+                    min_dij = *jet;
+                    min_idx = k;
+                }
+            }
+
+            let jet_a = &bj_jets[min_idx]; //might need to clone tbd
+            let mut jet_b_idx = jet_a.nn_jet_index();
+
+            // normalize
+            let min_dij = min_dij * self._invr2;
+
+            // keep old pointer info after removing from tiles
+            let old_b_jet: Option<Rc<RefCell<TiledJet>>> = None;
+
+            //check if jet_a has neighbor
+            match jet_b_idx {
+                Some(mut _jet_b_idx) => {
+                    if min_idx < _jet_b_idx {
+                        std::mem::swap(&mut min_idx, &mut _jet_b_idx);
+                    }
+                    // nn is the new index we want to store the recombined index at
+                    // modify jetB for BJ with new info
+
+                    let new_bj = self.do_jet_jet_recombination_step(
+                        bj_jets[min_idx].jets_index(),
+                        bj_jets[_jet_b_idx].jets_index(),
+                        min_dij,
+                    );
+
+                    // do jj now remove jetA from tiles
+                    // and remove old jetB
+                    // and add newly merged jetB
+                    self.bj_remove_from_tiles(&bj_jets[min_idx]);
+                    // no longer need this line because we call tj_set_jetinfo
+                    // bj_jets[_jet_b_idx] = new_bj;
+                    // apperantly need oldJetB pointer needs to be stored?
+                    old_b_jet = bj_jets[_jet_b_idx].clone();
+                    self.bj_remove_from_tiles(&bj_jets[_jet_b_idx]);
+
+                    self._tj_set_jetinfo(&mut tiles, new_bj, bj_jets[_jet_b_idx].jets_index())
+                        .jets_index();
+
+                    // TODO: check if removing this line doesnt do anything
+                    jet_b_idx = Some(_jet_b_idx);
+                }
+                None => {
+                    self.do_jet_beam_recombination_step(bj_jets[min_idx].jets_index(), min_dij);
+
+                    //remove jet from tile
+                    self.bj_remove_from_tiles(&bj_jets[min_idx])
+                }
+            };
+
+            //some tile stuff check in between to find out which neighbors we need to update
+
+            let mut n_near_tiles: usize = 0;
+            // add neighbors to one search vector "tile_union"
+            self._add_neighbors_to_tile_union(
+                bj_jets[min_idx].borrow().tile_index,
+                &mut tile_union,
+                &mut n_near_tiles,
+            );
+
+            if let Some(jet_b_idx) = jet_b_idx {
+                // if we add other neighbors then add flag
+                let mut need_sort = false;
+                // if same tile then ignore
+                if bj_jets[jet_b_idx].borrow().tile_index != bj_jets[min_idx].borrow().tile_index {
+                    need_sort = true;
+                    self._add_neighbors_to_tile_union(
+                        bj_jets[jet_b_idx].borrow().tile_index,
+                        &mut tile_union,
+                        &mut n_near_tiles,
+                    );
+                }
+
+                //check if old jet needs to be added too
+                if let Some(old_b_jet) = old_b_jet
+                    && old_b_jet.borrow().tile_index != bj_jets[jet_b_idx].borrow().tile_index
+                    && old_b_jet.borrow().tile_index != bj_jets[min_idx].borrow().tile_index
+                {
+                    need_sort = true;
+                    self._add_neighbors_to_tile_union(
+                        old_b_jet.borrow().tile_index,
+                        &mut tile_union,
+                        &mut n_near_tiles,
+                    );
+                }
+
+                if need_sort {
+                    // sort tiles up to n_near tiles just take a slice
+                    &mut tile_union[0..n_near_tiles].sort();
+
+                    //take sorted list and now compress repeated tiles
+                    // by doing On^2 search for duplicates
+                    let mut compressed_idx = 1;
+                    for idx in 1..n_near_tiles {
+                        if tile_union[idx] != tile_union[compressed_idx - 1] {
+                            tile_union[compressed_idx] = tile_union[i];
+                            compressed_idx += 1;
+                        }
+                    }
+                    n_near_tiles = compressed_idx;
+                }
+
+                //here we need old jet pointer info
+            }
+
+            // now we update the nn neighbor info and move old jet
+
+            //moves recombined min_idx with potential new NN jet at end_idx
+            //copy tail values to jetA
+
+            if min_idx != end_idx {
+                bj_jets.swap(min_idx, end_idx);
+                di_j.swap(min_idx, end_idx);
+
+                //check entire list and update NN of references to new jet
+                //very slow O(n) each time, compared to implicit pointer copying in C++
+                for jet in bj_jets.iter_mut().take(end_idx) {
+                    if jet.nn_jet_index() == Some(end_idx) {
+                        jet.set_nn_jet(Some(min_idx));
+                    }
+                }
+            }
+
+            //check entire list and update NN of references to new jet
+            //very slow O(n) each time, compared to implicit pointer copying in C++
+            for jet in bj_jets.iter_mut().take(end_idx) {
+                if jet.nn_jet_index() == Some(end_idx) {
+                    jet.set_nn_jet(Some(min_idx));
+                }
+            }
+        }
     }
 
     // TODO: change from briefjets to generic ProxyJet class
