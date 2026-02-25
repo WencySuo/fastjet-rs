@@ -11,6 +11,10 @@ use crate::proxy_jet::ProxyJet;
 use crate::proxy_jet::Tile;
 use crate::proxy_jet::TiledJet;
 use crate::pseudo_jet::PseudoJet;
+#[cfg(feature = "simd")]
+use std::simd::prelude::*;
+#[cfg(feature = "simd")]
+use std::simd::{Select, Simd, StdFloat};
 
 // TODO: add automatic strategies for clustering like BEST: N2Plain, N2Tiling
 pub struct ClusterSequence {
@@ -1069,6 +1073,248 @@ impl ClusterSequence {
         }
     }
 
+    #[inline]
+    #[cfg(feature = "simd")]
+    fn set_nn_bj_vec_simd_and_dij<J: ProxyJet>(&self, bj_jets: &mut Vec<J>, di_j: &mut Vec<f64>) {
+        // can obtain simd vectors from slices, just need to handle remainder
+        // for non SIMD vectors we need to init one whole array to vectorize
+        // for remainder we can just ignore and run regular scalar algorithm
+
+        // however if jet does not have NN we must set to f64::max for getting min
+        // thus we need nn_array, nn_dist array
+        // range to consider
+        // rap_array, phi_array, R2 as splat (constant)
+        // handle the dist function with these array
+
+        let n = bj_jets.len();
+        let mut rap_array = Vec::with_capacity(n);
+        let mut phi_array = Vec::with_capacity(n);
+        let mut nn_array = Vec::with_capacity(n);
+        let mut nn_dist_array = Vec::with_capacity(n);
+        let mut kt2_array = Vec::with_capacity(n);
+
+        // push all vectors now
+        bj_jets.iter().enumerate().for_each(|(i, jet)| {
+            rap_array.push(jet.eta());
+            phi_array.push(jet.phi());
+            nn_array.push(jet.nn_jet_index().unwrap_or_else(|| i) as u64);
+            nn_dist_array.push(jet.nn_dist());
+            kt2_array.push(jet.kt2());
+        });
+
+        // now we can acc call SIMD func
+        //
+        // define a const for lanes
+
+        const LANES: usize = 16;
+        let n = bj_jets.len();
+        for i in 1..n {
+            ClusterSequence::set_nn_crosscheck_simd::<LANES>(
+                i,
+                0,     // from = 0
+                i - 1, // to s= i-1 inclusive
+                &rap_array,
+                &phi_array,
+                self.r2,
+                &mut nn_dist_array,
+                &mut nn_array,
+            );
+            // // we still need to handle remainder
+            // // j does not return i
+            // for remainder_idx in j..=i {
+            //     self.bj_set_nn_crosscheck(&mut bj_jets[0..=remainder_idx]);
+            // }
+        }
+
+        ClusterSequence::_dij_simd::<LANES>(&kt2_array, &nn_array, &nn_dist_array, di_j);
+
+        //now go through all bj jets and set nn and nndist
+        bj_jets.iter_mut().enumerate().for_each(|(i, jet)| {
+            jet.set_nn_dist(nn_dist_array[i]);
+            jet.set_nn_jet(if nn_array[i] as usize != i {
+                Some(nn_array[i] as usize)
+            } else {
+                None
+            });
+        });
+    }
+
+    #[inline]
+    #[cfg(feature = "simd")]
+    pub fn set_nn_crosscheck_simd<const LANES: usize>(
+        i: usize,
+        start: usize,
+        end: usize, // inclusive; if from > to, do nothing
+        rap_arr: &[f64],
+        phi_arr: &[f64],
+        r2: f64,
+        nndist_arr: &mut [f64],
+        nn_arr: &mut [u64],
+    ) {
+        let rap_i = rap_arr[i];
+
+        let phi_i = phi_arr[i];
+
+        let mut j = start;
+
+        // SIMD state: best candidate for i across all processed j's
+        let mut best_d2 = Simd::<f64, LANES>::splat(r2);
+        let mut best_j = Simd::<u64, LANES>::splat(i as u64);
+
+        // constant lane offsets [0,1,2,...]
+        let lane_offsets: Simd<u64, LANES> = Simd::from_array(std::array::from_fn(|k| k as u64));
+
+        while j + LANES <= (end + 1) {
+            let rap_j = Simd::<f64, LANES>::from_slice(&rap_arr[j..j + LANES]);
+            let phi_j = Simd::<f64, LANES>::from_slice(&phi_arr[j..j + LANES]);
+            let dist = ClusterSequence::bj_dist_simd(rap_i, phi_i, rap_j, phi_j);
+            // 1) Update best candidate for i (vector select)
+            let idx = Simd::<u64, LANES>::splat(j as u64) + lane_offsets;
+            let better_for_i = dist.simd_lt(best_d2);
+            best_d2 = better_for_i.select(dist, best_d2);
+            best_j = better_for_i.select(idx, best_j);
+
+            // 2) Cross-check update for [j..j+LANES): nndist/nn, via masked blend
+            //    Because this region is contiguous, we can do SIMD loads/stores.
+            let old_d = Simd::<f64, LANES>::from_slice(&nndist_arr[j..j + LANES]);
+            let improve = dist.simd_lt(old_d);
+
+            let new_d = improve.select(dist, old_d);
+            new_d.copy_to_slice(&mut nndist_arr[j..j + LANES]);
+
+            // Update nn under same mask
+            let old_nn = Simd::<u64, LANES>::from_slice(&nn_arr[j..j + LANES]);
+            let i_vec = Simd::<u64, LANES>::splat(i as u64);
+            let new_nn = improve.select(i_vec, old_nn);
+            new_nn.copy_to_slice(&mut nn_arr[j..j + LANES]);
+
+            j += LANES;
+        }
+
+        let mut nndist_min = r2;
+        let mut nn_min = i as u64;
+
+        //handle the tail/remainder of non simd aligned lanes regularly
+        while j <= end {
+            let drap = rap_i - rap_arr[j];
+            let mut dphi = (phi_i - phi_arr[j]).abs();
+            if dphi > PI {
+                dphi = 2.0 * PI - dphi
+            }
+            let d2 = drap.mul_add(drap, dphi * dphi);
+
+            // update i's best (scalar for tail)
+            if d2 < nndist_min {
+                nndist_min = d2;
+                nn_min = j as u64;
+            }
+
+            // cross-check update (scalar for tail)
+            if d2 < nndist_arr[j] {
+                nndist_arr[j] = d2;
+                nn_arr[j] = i as u64;
+            }
+
+            j += 1;
+        }
+
+        //Final horizontal reduction once
+        let bd = best_d2.to_array();
+        let bj = best_j.to_array();
+        for lane in 0..LANES {
+            if bd[lane] < nndist_min {
+                nndist_min = bd[lane];
+                nn_min = bj[lane];
+            }
+        }
+
+        nndist_arr[i] = nndist_min;
+        nn_arr[i] = nn_min;
+    }
+
+    #[inline]
+    #[cfg(feature = "simd")]
+    fn bj_dist_simd<const LANES: usize>(
+        rap_i: f64,
+        phi_i: f64,
+        rap_j: Simd<f64, LANES>,
+        phi_j: Simd<f64, LANES>,
+    ) -> Simd<f64, LANES> {
+        //splat to match lane size
+        let rap_i = Simd::splat(rap_i);
+        let phi_i = Simd::splat(phi_i);
+
+        let drap = rap_i - rap_j;
+
+        let mut dphi = (phi_i - phi_j).abs();
+        let pi = Simd::splat(PI);
+        let two_pi = Simd::splat(2.0 * PI);
+
+        let mask = dphi.simd_gt(pi);
+        dphi = mask.select(two_pi - dphi, dphi);
+
+        dphi.mul_add(dphi, drap * drap)
+    }
+
+    #[inline]
+    #[cfg(feature = "simd")]
+    fn _dij_simd<const LANES: usize>(
+        kt2_arr: &[f64],  // All kt2 values
+        nn_idx: &[u64],   // Neighbor indices
+        nn_dist: &[f64],  // Neighbor distances
+        di_j: &mut [f64], // Output
+    ) {
+        let n = kt2_arr.len();
+        let mut j = 0;
+
+        while j + LANES <= n {
+            // 1. Load data from slices into registers
+            let kt2_i = Simd::<f64, LANES>::from_slice(&kt2_arr[j..j + LANES]);
+            let dist_i = Simd::<f64, LANES>::from_slice(&nn_dist[j..j + LANES]);
+            let indices = Simd::<u64, LANES>::from_slice(&nn_idx[j..j + LANES]);
+
+            let indices_usize = indices.cast::<usize>();
+
+            // 2. The Gather: kt2_b = jets[index].kt2()
+            // We use gather_or to look up kt2_arr[indices[0]], kt2_arr[indices[1]], etc.
+            // If an index is out of bounds (shouldn't happen), it defaults to kt2_i.
+            let kt2_b = Simd::<f64, LANES>::gather_or(kt2_arr, indices_usize, kt2_i);
+
+            // 3. The Math: min(kt2_i, kt2_b) * dist_i
+            // Replacing 'if kt2_b < kt2_i' with a SIMD min
+            let kt2_min = kt2_i.simd_min(kt2_b);
+            let res = kt2_min * dist_i;
+
+            // 4. Store result back to slice
+            res.copy_to_slice(&mut di_j[j..j + LANES]);
+
+            j += LANES;
+        }
+
+        // Scalar tail handling
+        for i in j..n {
+            let idx = nn_idx[i] as usize;
+            di_j[i] = nn_dist[i] * kt2_arr[i].min(kt2_arr[idx]);
+        }
+    }
+
+    #[inline(always)]
+    #[cfg(not(feature = "simd"))]
+    fn set_nn_and_dij<J: ProxyJet>(&mut self, bj_jets: &mut Vec<J>, di_j: &mut Vec<f64>) {
+        let n = bj_jets.len();
+        for i in 1..n {
+            self.bj_set_nn_crosscheck(&mut bj_jets[0..=i]);
+        }
+
+        di_j.iter_mut().enumerate().for_each(|(i, jet)| {
+            *jet = J::_bj_dij(&bj_jets[i], &bj_jets);
+        });
+    }
+    #[cfg(feature = "simd")]
+    fn set_nn_and_dij<J: ProxyJet>(&mut self, bj_jets: &mut Vec<J>, di_j: &mut Vec<f64>) {
+        self.set_nn_crosscheck_simd(bj_jets, di_j);
+    }
+
     // TODO: change from briefjets to generic ProxyJet class
     pub fn simple_n2_cluster<J: ProxyJet>(&mut self) {
         let n = self.particles.len();
@@ -1091,15 +1337,32 @@ impl ClusterSequence {
             bj_jets.push(bj);
         });
 
-        for i in 1..n {
-            self.bj_set_nn_crosscheck(&mut bj_jets[0..=i]);
-        }
+        // only add cfg_if when we acc implement simd feature
+        // cfg_if! {
+        //         if #[cfg(crate = "f64_SIMD")] {
+        //             set_nn_info_simd(&mut bj_jets[0..=i], i)
+        //         } else {
+        //             for i in 1..n {
+        //                 self.bj_set_nn_crosscheck(&mut bj_jets[0..=i]);
+        //             }
+        //         }
+        //     }
+        // // cand for simd
+
+        // self.set_nn_bj_vec_simd(&mut bj_jets);
+        //
+        //self.set_nn_bj_vec_simd_and_dij(&mut bj_jets);
+
+        // for i in 1..n {
+        //     self.bj_set_nn_crosscheck(&mut bj_jets[0..=i]);
+        // }
 
         let mut di_j: Vec<f64> = vec![0.0; n];
+        self.set_nn_and_dij(&mut bj_jets, &mut di_j);
 
-        di_j.iter_mut().enumerate().for_each(|(i, jet)| {
-            *jet = J::_bj_dij(&bj_jets[i], &bj_jets);
-        });
+        // di_j.iter_mut().enumerate().for_each(|(i, jet)| {
+        //     *jet = J::_bj_dij(&bj_jets[i], &bj_jets);
+        // });
 
         for i in 0..n {
             //find min distance

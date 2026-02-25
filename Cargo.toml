@@ -16,6 +16,9 @@ debug = "line-tables-only"
 [dependencies]
 log = "0.4.29"
 
+[features]
+simd = []
+
 [profile.release]
 codegen-units = 1
 lto = "thin"

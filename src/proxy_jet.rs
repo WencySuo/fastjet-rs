@@ -67,18 +67,27 @@ impl Tile {
     }
 }
 
-impl TiledJet {
-    pub fn eta(&self) -> f64 {
+// impl TiledJet {
+//     pub fn eta(&self) -> f64 {
+//         self.eta
+//     }
+
+//     #[inline]
+//     pub fn phi(&self) -> f64 {
+//         self.phi
+//     }
+// }
+
+impl ProxyJet for TiledJet {
+    #[inline]
+    fn eta(&self) -> f64 {
         self.eta
     }
 
     #[inline]
-    pub fn phi(&self) -> f64 {
+    fn phi(&self) -> f64 {
         self.phi
     }
-}
-
-impl ProxyJet for TiledJet {
     #[inline]
     fn kt2(&self) -> f64 {
         self.kt2
@@ -130,6 +139,14 @@ impl ProxyJet for TiledJet {
             }
         }
         jet.nn_dist() * kt2
+
+        // use a min which defaults to max if not found maye bfaster?
+        // jet.nn_dist()
+        //     * jet.kt2().min(
+        //         jet.nn_jet_index()
+        //             .map(|index| jets[index].kt2())
+        //             .unwrap_or(f64::MAX),
+        //     )
     }
 
     fn _bj_set_jetinfo(index: usize, pseudo_jet: &PseudoJet, r2: f64, kt2: f64) -> TiledJet {
@@ -151,6 +168,16 @@ impl ProxyJet for TiledJet {
 
 //TODO remove the need for this class but needed for _bj_dij
 impl ProxyJet for Rc<RefCell<TiledJet>> {
+    #[inline]
+    fn eta(&self) -> f64 {
+        self.borrow().eta
+    }
+
+    #[inline]
+    fn phi(&self) -> f64 {
+        self.borrow().phi
+    }
+
     #[inline]
     fn kt2(&self) -> f64 {
         self.borrow().kt2
@@ -250,6 +277,10 @@ impl BriefJet {
 //for this trait include all generics
 // include NN information
 pub trait ProxyJet {
+    fn eta(&self) -> f64;
+
+    fn phi(&self) -> f64;
+
     // problem is that jets do not have 4 mom only rap phi kt2 call this proxyjet
     fn kt2(&self) -> f64;
 
@@ -307,7 +338,19 @@ pub enum JetType<'a> {
     EEBriefJetType(&'a EEBriefJet),
 }
 
-impl BriefJet {
+// impl BriefJet {
+//     #[inline]
+//     fn eta(&self) -> f64 {
+//         self.eta
+//     }
+
+//     #[inline]
+//     fn phi(&self) -> f64 {
+//         self.phi
+//     }
+// }
+
+impl ProxyJet for BriefJet {
     #[inline]
     fn eta(&self) -> f64 {
         self.eta
@@ -317,9 +360,7 @@ impl BriefJet {
     fn phi(&self) -> f64 {
         self.phi
     }
-}
 
-impl ProxyJet for BriefJet {
     #[inline]
     fn kt2(&self) -> f64 {
         self.kt2
@@ -407,6 +448,16 @@ impl EEBriefJet {
 }
 
 impl ProxyJet for EEBriefJet {
+    #[inline]
+    fn eta(&self) -> f64 {
+        panic!(" Should not be calling Phi in EE BJ")
+    }
+
+    #[inline]
+    fn phi(&self) -> f64 {
+        panic!(" Should not be calling Phi in EE BJ")
+    }
+
     #[inline]
     fn kt2(&self) -> f64 {
         self.kt2
