@@ -5,6 +5,7 @@ use std::rc::Rc;
 
 use crate::constants::PI;
 use crate::proxy_jet::BriefJet;
+use crate::proxy_jet::EEBriefJet;
 use crate::proxy_jet::ProxyJet;
 use crate::proxy_jet::Tile;
 use crate::proxy_jet::TiledJet;
@@ -46,6 +47,8 @@ pub enum Strategy {
     Best,
     N2Plain,
     N2Tiling,
+    N2PlainEEAccurate,
+    N2PlainEE,
 }
 
 // TODO: implement other algorithms
@@ -54,7 +57,9 @@ pub enum Algorithm {
     AntiKt,
     Kt,
     Cambridge,
-    Genkt,
+    GenKt,
+    EeKt,
+    EeGenKt,
 }
 
 pub enum RecombinationScheme {
@@ -159,17 +164,32 @@ impl ClusterSequence {
                 } else {
                     1e300
                 }
-            }
+            },
             Algorithm::Cambridge => 1.0,
-            Algorithm::Genkt => {
+            Algorithm::GenKt => {
                 let p = extra_param.unwrap_or(0.0);
                 // TODO: figure out if there's a better way to handle this
                 if p <= 0.0 && kt2 < 1e-300 {
                     kt2 = 1e-300;
                 }
                 kt2.powf(p)
-            } //TODO: implement everything with extraparam for ee jets
-        }
+            },
+            Algorithm::EeKt => {
+                let e = jet.e(); 
+                let scale = e*e;
+                scale
+            },
+            Algorithm::EeGenKt => {
+                let p = extra_param.unwrap();
+                let e = jet.e(); 
+                let mut scale = e*e;
+                if p <= 0.0 && scale < 1e-300 {
+                    scale = 1e-300; 
+                    kt2 = scale.powf(p);
+                }
+                kt2
+            }
+        }   
     }
 
     #[inline]
@@ -182,6 +202,20 @@ impl ClusterSequence {
         //event is empty so exit
         if self.n_particles() == 0 {
             return;
+        }
+
+        if self.jetdef.algorithm == Algorithm::EeGenKt || self.jetdef.algorithm == Algorithm::EeKt {
+            if self.jetdef.algorithm == Algorithm::EeKt {
+                assert!(self.jetdef.r > PI);
+                self._invr2 = 1.0;
+            } else {
+                if self.jetdef.r > PI {
+                    self.r2 = 2.0 * (3.0 + (self.jetdef.r).cos());
+                } else {
+                    self.r2 = 2.0 * (1.0 - (self.jetdef.r).cos());
+                }
+                self._invr2 = 1.0 / self.r2;
+            }
         }
 
         //TODO: when implementing other strategies have to handle here
@@ -198,9 +232,14 @@ impl ClusterSequence {
             Strategy::N2Tiling => {
                 self.tiled_n2_cluster();
                 //TODO: implement N2Tiling strategy
-            } // _ => {
-              //     panic!("Unsupported strategy");
-              // }
+            }
+            Strategy::N2PlainEEAccurate => {
+                // TODO: decide how to pass down flag for using accurate bj dist
+                self.simple_n2_cluster::<EEBriefJet>();
+            }
+            Strategy::N2PlainEE => {
+                self.simple_n2_cluster::<EEBriefJet>();
+            }
         }
     }
 
@@ -249,7 +288,7 @@ impl ClusterSequence {
                     })
                     .collect()
             }
-            Algorithm::Genkt | Algorithm::AntiKt => self
+            Algorithm::EeGenKt | Algorithm::EeKt | Algorithm::GenKt | Algorithm::AntiKt => self
                 ._history
                 .iter()
                 .rev()
@@ -318,7 +357,10 @@ impl ClusterSequence {
         let algorithm = &self.jetdef.algorithm;
         if *algorithm != Algorithm::Cambridge
             && *algorithm != Algorithm::Kt
-            && *algorithm != Algorithm::Genkt
+            && *algorithm != Algorithm::GenKt
+            && *algorithm != Algorithm::EeKt
+            && !((*algorithm == Algorithm::GenKt) || *algorithm == Algorithm::EeGenKt)
+            && (self.jetdef.extra_param.unwrap_or(0.0) >= 0.0)
         {
             warn!(
                 "dcut and exclusive jets for jet-finders other than kt, C/A or genkt with p>=0 should be interpreted with care."
