@@ -10,14 +10,14 @@ pub struct BriefJet {
     pub kt2: f64,
     pub nn_dist: f64, // either nn_dist == option, or only read dist if nn_jet != None
     pub nn_jet_index: Option<usize>, //TODO: investigate if box is best way to do this
-    pub _jets_index: usize, // either index == option, or only read index if nn_jet != None
+    pub particle_index: usize, // either index == option, or only read index if nn_jet != None
 }
 
 pub struct EEBriefJet {
     pub kt2: f64,
     pub nn_dist: f64, // either nn_dist == option, or only read dist if nn_jet != None
     pub nn_jet_index: Option<usize>,
-    pub _jets_index: usize, // either index == option, or only read index if nn_jet != None
+    pub particle_index: usize, // either index == option, or only read index if nn_jet != None
     pub nx: f64,
     pub ny: f64,
     pub nz: f64,
@@ -40,15 +40,15 @@ pub struct TiledJet {
     pub kt2: f64,
     pub nn_dist: f64, // either nn_dist == option, or only read dist if nn_jet != None
     pub nn_jet_index: Option<usize>, //TODO: investigate if box is best way to do this
-    pub _jets_index: usize, // either index == option, or only read index if nn_jet != None
+    pub particle_index: usize, // either index == option, or only read index if nn_jet != None
+    pub bj_jet_index: usize,
     pub tile_index: usize,
-    pub dij_posn: usize,
     //Pointers to other jets
     pub prev_jet: Option<Rc<RefCell<TiledJet>>>,
     pub next_jet: Option<Rc<RefCell<TiledJet>>>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct Tile {
     pub begin_tiles: [usize; 9],
     pub surrounding_tiles: std::ops::Range<usize>,
@@ -94,8 +94,8 @@ impl ProxyJet for TiledJet {
     }
 
     #[inline]
-    fn jets_index(&self) -> usize {
-        self._jets_index
+    fn particle_index(&self) -> usize {
+        self.particle_index
     }
 
     #[inline]
@@ -133,8 +133,19 @@ impl ProxyJet for TiledJet {
     }
 
     fn _bj_set_jetinfo(index: usize, pseudo_jet: &PseudoJet, r2: f64, kt2: f64) -> TiledJet {
-        //TODO implement bj_set info
-        TiledJet::default()
+        TiledJet {
+            eta: *pseudo_jet.rap(),
+            phi: *pseudo_jet.phi(),
+            kt2,
+            nn_dist: r2,
+            nn_jet_index: None,
+            // at init paritlc_index and bj_jet_index should be the same
+            particle_index: index,
+            bj_jet_index: index,
+            tile_index: 0, // default value
+            prev_jet: None,
+            next_jet: None,
+        }
     }
 }
 
@@ -146,8 +157,8 @@ impl ProxyJet for Rc<RefCell<TiledJet>> {
     }
 
     #[inline]
-    fn jets_index(&self) -> usize {
-        self.borrow()._jets_index
+    fn particle_index(&self) -> usize {
+        self.borrow().particle_index
     }
 
     #[inline]
@@ -242,7 +253,7 @@ pub trait ProxyJet {
     // problem is that jets do not have 4 mom only rap phi kt2 call this proxyjet
     fn kt2(&self) -> f64;
 
-    fn jets_index(&self) -> usize;
+    fn particle_index(&self) -> usize;
 
     fn eta_jet_type(&self, jet: &JetType) -> f64 {
         match jet {
@@ -318,8 +329,8 @@ impl ProxyJet for BriefJet {
     }
 
     #[inline]
-    fn jets_index(&self) -> usize {
-        self._jets_index
+    fn particle_index(&self) -> usize {
+        self.particle_index
     }
 
     #[inline]
@@ -358,7 +369,7 @@ impl ProxyJet for BriefJet {
             eta: *pseudo_jet.rap(),
             phi: *pseudo_jet.phi(),
             kt2,
-            _jets_index: index,
+            particle_index: index,
             nn_dist: r2,
             nn_jet_index: None,
         }
@@ -403,8 +414,8 @@ impl ProxyJet for EEBriefJet {
     }
 
     #[inline]
-    fn jets_index(&self) -> usize {
-        self._jets_index
+    fn particle_index(&self) -> usize {
+        self.particle_index
     }
 
     fn create_jet_type(&'_ self) -> JetType<'_> {
@@ -449,7 +460,7 @@ impl ProxyJet for EEBriefJet {
         }
         EEBriefJet {
             kt2,
-            _jets_index: index,
+            particle_index: index,
             nn_dist: r2,
             nn_jet_index: None,
             nx,
