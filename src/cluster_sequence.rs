@@ -725,7 +725,10 @@ impl ClusterSequence {
 
         //set bj info for all tiles
         for (i, jet) in particles.iter().enumerate() {
-            bj_jets.push(self._tj_set_jetinfo(&mut tiles, jet, i));
+            let mut jet = self._tj_set_jetinfo(&mut tiles, jet, i);
+            // reluctantly add jet index for getting index in linked lists
+            jet.borrow().bj_jet_index = i;
+            bj_jets.push(jet);
         }
 
         self.tiles_struct._tiles = tiles;
@@ -963,7 +966,8 @@ impl ClusterSequence {
                                         // TODO: face same problem with jet_j since we dont have index
                                         // for tiled jet it may be wiser to just set nn_jet with RC now
                                         // instead of jet_index
-                                        jet_i.borrow().nn_jet_index = None;
+                                        jet_i.borrow().nn_jet_index =
+                                            Some(jet_j.borrow().bj_jet_index);
                                     }
                                     jet_j_next = jet_j.borrow().next_jet.clone();
                                 }
@@ -982,7 +986,7 @@ impl ClusterSequence {
                             jet_i.borrow().nn_jet_index = Some(jet_b_idx);
                             // how to get index of jet_i for di_j if jet_i in this loop has no index????
                             // TODO figure out jet_i index for
-                            // diJ[jet_i_idx] = _bj_diJ(jet_i); // update diJ...
+                            di_j[jet_i.borrow().bj_jet_index] = _bj_diJ(jet_i); // update diJ...
                         }
                         if dist < bj_jets[jet_b_idx].borrow().nn_dist
                             && !Rc::ptr_eq(&jet_i, &bj_jets[jet_b_idx])
