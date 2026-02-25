@@ -5,9 +5,9 @@ use fastjet_rs::cluster_sequence::RecombinationScheme;
 use fastjet_rs::cluster_sequence::Strategy;
 use fastjet_rs::pseudo_jet::PseudoJet;
 use std::fs::File;
-use std::io::stdout;
+// use std::io::stdout;
 use std::io::{BufRead, BufReader};
-use std::io::{BufWriter, Write};
+// use std::io::{BufWriter, Write};
 
 use criterion::{Criterion, criterion_group, criterion_main};
 
@@ -37,8 +37,8 @@ fn criterion_benchmark(c: &mut Criterion) {
 
             // let mut times: Vec<u128> = Vec::new();
 
-            let stdout = stdout();
-            let mut out = BufWriter::new(stdout.lock());
+            // let stdout = stdout();
+            // let mut out = BufWriter::new(stdout.lock());
 
             // let now = std::time::Instant::now();
 
@@ -62,29 +62,29 @@ fn criterion_benchmark(c: &mut Criterion) {
 
             let mut inclusive_jets: Vec<&PseudoJet> = clust_seq.inclusive_jets(pmin);
 
-            let inclusive_jets: &Vec<&PseudoJet> = PseudoJet::sorted_by_pt(&mut inclusive_jets);
+            let _inclusive_jets: &Vec<&PseudoJet> = PseudoJet::sorted_by_pt(&mut inclusive_jets);
 
             //let elapsed = now.elapsed().as_nanos();
             //times.push(elapsed);
 
-            writeln!(
-                out,
-                "{:>5} {:>15} {:>15} {:>15}",
-                "jet #", "rapiddity", "phi", "pt"
-            )
-            .unwrap();
+            // writeln!(
+            //     out,
+            //     "{:>5} {:>15} {:>15} {:>15}",
+            //     "jet #", "rapiddity", "phi", "pt"
+            // )
+            // .unwrap();
 
-            for (i, jet) in inclusive_jets.iter().enumerate() {
-                writeln!(
-                    out,
-                    "{:>5} {:>15.8} {:>15.8} {:>15.8}",
-                    i,
-                    jet.rap(),
-                    jet.phi(),
-                    jet.pt()
-                )
-                .unwrap();
-            }
+            // for (i, jet) in inclusive_jets.iter().enumerate() {
+            //     writeln!(
+            //         out,
+            //         "{:>5} {:>15.8} {:>15.8} {:>15.8}",
+            //         i,
+            //         jet.rap(),
+            //         jet.phi(),
+            //         jet.pt()
+            //     )
+            //     .unwrap();
+            // }
             // let elapsed = now.elapsed()?.as_nanos();
             // times.push(elapsed);
             //}

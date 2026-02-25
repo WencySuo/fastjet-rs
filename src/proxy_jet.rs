@@ -358,7 +358,9 @@ impl ProxyJet for BriefJet {
     fn _bj_dist(jet_a: &BriefJet, jet_b: &BriefJet) -> f64 {
         let dphi: f64 = PI - f64::abs(PI - f64::abs(jet_a.phi() - jet_b.phi()));
         let deta: f64 = jet_a.eta() - jet_b.eta();
-        dphi * dphi + deta * deta
+        //dphi * dphi + deta * deta
+        // modest 3% perfomance improvement versus prev impl
+        dphi.mul_add(dphi, deta * deta)
     }
 
     fn _bj_set_jetinfo(index: usize, pseudo_jet: &PseudoJet, r2: f64, kt2: f64) -> BriefJet {
