@@ -4,6 +4,7 @@ use std::panic;
 use std::rc::Rc;
 
 use crate::constants::PI;
+use crate::constants::TWO_PI;
 use crate::proxy_jet::BriefJet;
 use crate::proxy_jet::EEBriefJet;
 use crate::proxy_jet::ProxyJet;
@@ -227,7 +228,6 @@ impl ClusterSequence {
             }
             Strategy::N2Tiling => {
                 self.tiled_n2_cluster();
-                //TODO: implement N2Tiling strategy
             }
             Strategy::N2PlainEEAccurate => {
                 // TODO: decide how to pass down flag for using accurate bj dist
@@ -397,10 +397,8 @@ impl ClusterSequence {
         // in this config each bin has width of 1 rap
         let nrap = 20;
         let nbins = nrap * 2;
-
         let mut min_rap = f64::MAX;
         let mut max_rap = -f64::MAX;
-
         let mut counts = vec![0; nbins];
 
         let mut ubin: usize;
@@ -417,9 +415,8 @@ impl ClusterSequence {
                 max_rap = rap;
             }
 
-            //TODO: check if all this casting is best
             // rap will be a float so cast to i64 for binning
-            let ibin = rap as i64 + nrap as i64;
+            let ibin = (rap + nrap as f64) as i64;
             //the leftmost and rightmost bins will be used for overflow
             // thus bin =0 goes from [-infty, -19] and bin=39 [20, infty]
             if ibin < 0 {
@@ -435,9 +432,9 @@ impl ClusterSequence {
         //given all binning find count of busiest bin
         // particles will never be empty so just unwrap
         let busiest_bin = counts.iter().max().unwrap();
+        println!("busiest_bin: {}", busiest_bin);
 
         //more magic numbers
-
         let allowed_max_fraction: f64 = 0.25;
         let min_multiplicity: f64 = 4.0;
 
@@ -445,6 +442,8 @@ impl ClusterSequence {
         let mut allowed_max_cumul = min_multiplicity
             .max(*busiest_bin as f64 * allowed_max_fraction)
             .floor();
+
+        println!("allowed_max_cumul: {}", allowed_max_cumul);
 
         // chance min_mult is more than busiest bin count
         // in which case allowed_max_cumul should not be greater than busiest bin count
@@ -459,7 +458,7 @@ impl ClusterSequence {
         for (i, &cnt) in counts.iter().enumerate().take(nbins) {
             cum_lo += cnt as f64;
             if cum_lo >= allowed_max_cumul {
-                let y = (i - nrap) as f64;
+                let y = (i as f64) - (nrap as f64);
                 if y > min_rap {
                     min_rap = y;
                     ubin = i;
@@ -469,24 +468,23 @@ impl ClusterSequence {
         }
         //TODO prolly add an assert that we actally found a bin
         assert!(ubin != nbins);
-
         cumul_2 += cum_lo * cum_lo;
+        println!("after left scan cumul_2: {}", cumul_2);
 
         let ibin_lo = ubin;
 
         let mut cum_hi = 0.0;
-
         // do same as right except from hi to lo
         ubin = 0;
         for i in (0..nbins).rev() {
             cum_hi += counts[i] as f64;
             if cum_hi >= allowed_max_cumul {
                 //RHS side of last bin
-                let y = (i - nrap + 1) as f64;
+                let y = (i as f64 - nrap as f64 + 1.0) as f64;
                 if y < max_rap {
                     max_rap = y;
-                    ubin = i;
                 }
+                ubin = i;
                 break;
             }
         }
@@ -529,11 +527,19 @@ impl ClusterSequence {
 
         // for phi we need to check spacing against 2pi
         // when phi is <3 no tiling is done so min = 3
-        self.tiles_struct._n_tiles_phi = ((PI * 2.0 / default_tile_size).floor() as isize).max(3);
-        self.tiles_struct._tile_size_phi = PI * 2.0 / self.tiles_struct._n_tiles_phi as f64;
+        self.tiles_struct._n_tiles_phi = ((TWO_PI / default_tile_size).floor() as isize).max(3);
+        self.tiles_struct._tile_size_phi = (TWO_PI) / self.tiles_struct._n_tiles_phi as f64;
+        println!(
+            "n_tiles_phi: {}, _tile_size_phi: {}",
+            self.tiles_struct._n_tiles_phi, self.tiles_struct._tile_size_phi
+        );
 
         // find the min and max rap/eta that we should be using for this analysis
         let (min_rap, max_rap, _cumul_2) = self.min_max_rap();
+        println!(
+            "min_rap: {}, max_rap: {}, _cumul_2: {}",
+            min_rap, max_rap, _cumul_2
+        );
 
         //find min/max values for these tiles and figure out why _tiles_eta_min isnt just min_rap?
         self.tiles_struct._tiles_ieta_min =
@@ -544,6 +550,11 @@ impl ClusterSequence {
             self.tiles_struct._tiles_ieta_min as f64 * self.tiles_struct._tile_size_eta;
         self.tiles_struct._tiles_eta_max =
             self.tiles_struct._tiles_ieta_max as f64 * self.tiles_struct._tile_size_eta;
+
+        println!("_tiles_ieta_min={}", self.tiles_struct._tiles_ieta_min);
+        println!("_tiles_ieta_max={}", self.tiles_struct._tiles_ieta_max);
+        println!("_tiles_eta_min={}", self.tiles_struct._tiles_eta_min);
+        println!("_tiles_eta_max={}", self.tiles_struct._tiles_eta_max);
 
         // allocate the vector for the size of tiles before pushing
         // TODO: figure out how to access internal _tiles struct with object
@@ -561,6 +572,13 @@ impl ClusterSequence {
             for iphi in 0..self.tiles_struct._n_tiles_phi {
                 let mut tile_idx = 0;
                 let tile: &mut Tile = &mut tiles[self._tile_int_index(ieta, iphi)];
+
+                let print_tile_idx = self._tile_int_index(ieta, iphi);
+                println!(
+                    "starting cross-referencing at ieta {} and iphi {} for tile {}",
+                    ieta, iphi, print_tile_idx
+                );
+
                 // first tile has no HEAD
                 tile.head = Option::None;
 
@@ -589,12 +607,23 @@ impl ClusterSequence {
                 // first RHS is above curr elem
                 tile_idx += 1;
                 tile.begin_tiles[tile_idx] = self._tile_int_index(ieta, iphi + 1);
+                println!(
+                    "setup first R index={}",
+                    self._tile_int_index(ieta, iphi + 1)
+                );
 
                 // only set last R if we are not at max
                 if ieta < self.tiles_struct._tiles_ieta_max {
                     for idphi in [-1isize, 0, 1] {
                         tile_idx += 1;
+                        tile_idx = tile_idx % 9 as usize;
+                        let print_tile_idx = self._tile_int_index(ieta + 1, iphi + idphi);
+                        println!("print out of bounds tile index: {}", print_tile_idx);
                         tile.begin_tiles[tile_idx] = self._tile_int_index(ieta + 1, iphi + idphi);
+                        // println!(
+                        //     "setup remaining R's if ieta is not max {}",
+                        //     self._tile_int_index(ieta + 1, iphi + idphi)
+                        // );
                     }
                 }
 
@@ -602,7 +631,7 @@ impl ClusterSequence {
                 // check if this does not have runtime errors?
                 // TODO: this is not fully defined to be these constants since need to accound for when
                 // ieta > self._tiles_ieta_min  and when ieta < self._tiles_ieta_max
-                tile.surrounding_tiles = 1..5;
+                tile.surrounding_tiles = 1..9;
                 tile.rh_tiles = 5..9;
             }
         }
@@ -645,62 +674,44 @@ impl ClusterSequence {
         tiled_jet: Option<TiledJet>,
         particle_index: usize,
     ) -> Rc<RefCell<TiledJet>> {
-        match tiled_jet {
-            Some(tj) => {
-                // already existing tilejet so all we need to do is set the tile info
-                let jet: Rc<RefCell<TiledJet>> = Rc::new(RefCell::new(tj));
-                //TODO: this seems pretty sketch but at this point no other references should have mut access
-                // or even ref to data
-                jet.borrow_mut().tile_index =
-                    self._tile_index(jet.borrow().eta(), jet.borrow().phi());
-                let tile_index = jet.borrow().tile_index;
+        let jet = if let Some(tj) = tiled_jet {
+            Rc::new(RefCell::new(tj))
+        } else {
+            let pseudo_jet = &self.particles[particle_index];
+            let new_tj = TiledJet::_bj_set_jetinfo(
+                particle_index,
+                pseudo_jet,
+                self.r2,
+                ClusterSequence::jet_scale_for_algorithm(
+                    pseudo_jet,
+                    &self.jetdef.algorithm,
+                    self.jetdef.extra_param,
+                ),
+            );
+            Rc::new(RefCell::new(new_tj))
+        };
 
-                // need to add jet pointer to linked List of jets
-                let tile = &mut self.tiles_struct._tiles[tile_index];
-                jet.borrow_mut().prev_jet = Option::None;
-                jet.borrow_mut().next_jet = tile.head.clone();
-                if jet.borrow().next_jet.is_some() {
-                    let next = tile.head.as_ref().unwrap();
-                    next.borrow_mut().prev_jet = Some(Rc::clone(&jet));
-                }
+        let (eta, phi) = {
+            let j = jet.borrow();
+            (j.eta(), j.phi())
+        };
 
-                tile.head = Some(Rc::clone(&jet));
-                jet
-            }
-            None => {
-                // if no existing tj then init one with _bj_set_jet_info
-                let particle_jet = &self.particles[particle_index];
-                let new_tj = TiledJet::_bj_set_jetinfo(
-                    particle_index,
-                    particle_jet,
-                    self.r2,
-                    ClusterSequence::jet_scale_for_algorithm(
-                        particle_jet,
-                        &self.jetdef.algorithm,
-                        self.jetdef.extra_param,
-                    ),
-                );
+        jet.borrow_mut().tile_index = self._tile_index(eta, phi);
+        let tile_index = jet.borrow().tile_index;
 
-                let jet: Rc<RefCell<TiledJet>> = Rc::new(RefCell::new(new_tj));
-                //TODO: this seems pretty sketch but at this point no other references should have mut access
-                // or even ref to data
-                jet.borrow_mut().tile_index =
-                    self._tile_index(jet.borrow().eta(), jet.borrow().phi());
-                let tile_index = jet.borrow().tile_index;
-
-                // need to add jet pointer to linked List of jets
-                let tile = &mut self.tiles_struct._tiles[tile_index];
-                jet.borrow_mut().prev_jet = Option::None;
-                jet.borrow_mut().next_jet = tile.head.clone();
-                if jet.borrow().next_jet.is_some() {
-                    let next = tile.head.as_ref().unwrap();
-                    next.borrow_mut().prev_jet = Some(Rc::clone(&jet));
-                }
-
-                tile.head = Some(Rc::clone(&jet));
-                jet
-            }
+        // need to add jet pointer to linked List of jets
+        {
+            let mut j = jet.borrow_mut();
+            j.prev_jet = None;
+            j.next_jet = self.tiles_struct._tiles[tile_index].head.clone();
         }
+
+        if let Some(next) = self.tiles_struct._tiles[tile_index].head.as_ref() {
+            next.borrow_mut().prev_jet = Some(Rc::clone(&jet));
+        }
+
+        self.tiles_struct._tiles[tile_index].head = Some(Rc::clone(&jet));
+        jet
     }
 
     pub fn bj_remove_from_tiles(&mut self, jet: &Rc<RefCell<TiledJet>>) {
@@ -970,7 +981,7 @@ impl ClusterSequence {
             }
 
             // now update new jetB NN by using tile union
-            for &tile_union_neighbor in tile_union.iter().take(n_near_tiles)  {
+            for &tile_union_neighbor in tile_union.iter().take(n_near_tiles) {
                 let tile = &self.tiles_struct._tiles[tile_union[tile_union_neighbor]];
 
                 let mut jet_i_next = tile.head.clone();

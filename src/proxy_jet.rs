@@ -291,16 +291,13 @@ pub trait ProxyJet {
 
     #[inline]
     fn _bj_dij<J: ProxyJet>(jet: &J, jets: &[J]) -> f64 {
-        let mut kt2 = jet.kt2();
-        if let Some(index) = jet.nn_jet_index() {
-            let kt2_b = jets[index].kt2();
-            if kt2_b < kt2 {
-                kt2 = kt2_b;
-            }
-        }
-        jet.nn_dist() * kt2
+        jet.nn_dist()
+            * jet.kt2().min(
+                jet.nn_jet_index()
+                    .map(|index| jets[index].kt2())
+                    .unwrap_or(f64::MAX),
+            )
     }
-
     fn _bj_set_jetinfo(index: usize, pseudo_jet: &PseudoJet, r2: f64, kt2: f64) -> Self;
 }
 

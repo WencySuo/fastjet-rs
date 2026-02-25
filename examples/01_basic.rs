@@ -10,7 +10,6 @@ use std::io::{BufRead, BufReader};
 use std::io::{BufWriter, Write};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
-
     let file = File::open("./examples/data/single-event.dat")?;
     let mut reader = BufReader::new(file);
 
@@ -36,7 +35,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Algorithm::AntiKt,
         0.6,
         RecombinationScheme::EScheme,
-        Strategy::N2Plain,
+        Strategy::N2Tiling,
         None, // no need for extra parameters with AntiKt
     );
 
@@ -45,7 +44,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pmin = 5.0;
     let mut inclusive_jets: Vec<&PseudoJet> = clust_seq.inclusive_jets(pmin);
     let inclusive_jets: &mut Vec<&PseudoJet> = PseudoJet::sorted_by_pt(&mut inclusive_jets);
-    
 
     let stdout = stdout();
     let mut out = BufWriter::new(stdout.lock());
