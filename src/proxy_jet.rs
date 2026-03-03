@@ -236,22 +236,12 @@ impl ProxyJet for Rc<RefCell<TiledJet>> {
     #[inline]
     fn _bj_dij<J: ProxyJet>(jet: &J, jets: &[J]) -> f64 {
         let mut kt2 = jet.kt2();
-        print!("starting kt2: {} ", kt2);
         if let Some(index) = jet.nn_jet_index() {
             let kt2_b = jets[index].kt2();
-            print!("nn index: {}, nn kt2: {} ", index, kt2_b);
             if kt2_b < kt2 {
                 kt2 = kt2_b;
             }
-        } else {
-            println!("no neighbor stored for jet");
         }
-        print!(
-            "final kt2: {}, nn_dist: {},  and returned diJ: {}\n",
-            kt2,
-            jet.nn_dist(),
-            jet.nn_dist() * kt2
-        );
         jet.nn_dist() * kt2
     }
 }
