@@ -727,7 +727,7 @@ impl ClusterSequence {
         new_jet_id
     }
 
-    pub fn bj_remove_from_tiles(&mut self, jets: &mut Vec<TiledJet>, jet_idx: usize) {
+    pub fn bj_remove_from_tiles(&mut self, jets: &mut [TiledJet], jet_idx: usize) {
         let tile = &mut self.tiles_struct._tiles[jets[jet_idx].tile_index];
 
         // if prev is null then jet is head
@@ -770,7 +770,7 @@ impl ClusterSequence {
 
     pub fn update_pair_nn(jet_a_idx: usize, jet_b_idx: usize, bj_jets: &mut [TiledJet]) {
         let (jet_a, jet_b) = ClusterSequence::two_mut(bj_jets, jet_a_idx, jet_b_idx);
-        let dist = TiledJet::_bj_dist(&jet_a, &jet_b);
+        let dist = TiledJet::_bj_dist(jet_a, jet_b);
 
         let a_nn_dist = jet_a.nn_dist();
         let b_nn_dist = jet_b.nn_dist();
@@ -803,7 +803,7 @@ impl ClusterSequence {
         // set up all NN info
         self.tiles_struct._tiles.iter().for_each(|tile| {
             // set bj_dist
-            let mut jet_a_next_idx = tile.head.clone();
+            let mut jet_a_next_idx = tile.head;
 
             while let Some(jet_a_idx) = jet_a_next_idx {
                 let mut jet_b_next_idx = tile.head;
