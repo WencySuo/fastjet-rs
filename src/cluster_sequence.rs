@@ -626,11 +626,7 @@ impl ClusterSequence {
 
                 //begin_tiles ppoints to neighboring tiles including itself?
                 tile.begin_tiles[tile_idx] = self._tile_int_index(ieta, iphi);
-
-                // the surrounding tiles excludes self
-                // can just use slices in rust
                 tile_idx += 1;
-                //tile.surrounding_tiles = &tile.begin_tiles[tile_idx..];
 
                 // after first loop of ieta we can now check prev column
                 // now left right middle
@@ -660,7 +656,7 @@ impl ClusterSequence {
                 }
 
                 // ieta > self._tiles_ieta_min  and when ieta < self._tiles_ieta_max
-                tile.surrounding_tiles = 1..9;
+                tile.begin_len = tile_idx;
                 tile.rh_tiles = rh_tile_start..tile_idx;
             }
         }
@@ -767,14 +763,40 @@ impl ClusterSequence {
 
     // add all neighbors indices around tile_index to tile_union
     pub fn _add_neighbors_to_tile_union(
-        &mut self,
+        &self,
         tile_index: usize,
         tile_union: &mut [usize],
         n_near_tiles: &mut usize, // make sure we're passing in an indexable index for union (since capped at 27)
     ) {
-        for near_tile_idx in self.tiles_struct._tiles[tile_index].begin_tiles {
-            tile_union[*n_near_tiles] = near_tile_idx;
+        let tile = &self.tiles_struct._tiles[tile_index];
+        for near_tile_idx in &tile.begin_tiles[0..tile.begin_len] {
+            tile_union[*n_near_tiles] = *near_tile_idx;
             *n_near_tiles += 1;
+        }
+    }
+
+    pub fn update_pair_nn(jet_a: &Rc<RefCell<TiledJet>>, jet_b: &Rc<RefCell<TiledJet>>) {
+        let dist = {
+            let a = jet_a.borrow();
+            let b = jet_b.borrow();
+            TiledJet::_bj_dist(&a, &b)
+        };
+
+        let a_nn_dist = jet_a.nn_dist();
+        let b_nn_dist = jet_b.nn_dist();
+        let a_idx = Some(jet_a.borrow().bj_jet_index);
+        let b_idx = Some(jet_b.borrow().bj_jet_index);
+
+        if dist < a_nn_dist {
+            let mut a = jet_a.borrow_mut();
+            a.set_nn_dist(dist);
+            a.set_nn_jet(b_idx);
+        }
+
+        if dist < b_nn_dist {
+            let mut b = jet_b.borrow_mut();
+            b.set_nn_dist(dist);
+            b.set_nn_jet(a_idx);
         }
     }
 
@@ -798,34 +820,11 @@ impl ClusterSequence {
 
             while let Some(jet_a) = jet_a_next {
                 let mut jet_b_next = tile.head.clone();
-
                 while let Some(jet_b) = jet_b_next {
                     if Rc::ptr_eq(&jet_a, &jet_b) {
                         break;
                     }
-
-                    let dist = {
-                        let a = jet_a.borrow();
-                        let b = jet_b.borrow();
-                        TiledJet::_bj_dist(&a, &b)
-                    };
-
-                    let a_nn_dist = jet_a.nn_dist();
-                    let b_nn_dist = jet_b.nn_dist();
-                    let a_idx = Some(jet_a.borrow().bj_jet_index);
-                    let b_idx = Some(jet_b.borrow().bj_jet_index);
-
-                    if dist < a_nn_dist {
-                        let mut a = jet_a.borrow_mut();
-                        a.set_nn_dist(dist);
-                        a.set_nn_jet(b_idx);
-                    }
-
-                    if dist < b_nn_dist {
-                        let mut b = jet_b.borrow_mut();
-                        b.set_nn_dist(dist);
-                        b.set_nn_jet(a_idx);
-                    }
+                    ClusterSequence::update_pair_nn(&jet_a, &jet_b);
                     jet_b_next = jet_b.borrow().next_jet.clone();
                 }
                 jet_a_next = jet_a.borrow().next_jet.clone();
@@ -842,27 +841,7 @@ impl ClusterSequence {
                     // now we loop over all RH tile jets
                     let mut jet_b_next = rh_tile.head.clone();
                     while let Some(jet_b) = jet_b_next {
-                        let dist = {
-                            let a = jet_a.borrow();
-                            let b = jet_b.borrow();
-                            TiledJet::_bj_dist(&a, &b)
-                        };
-
-                        let a_nn_dist = jet_a.nn_dist();
-                        let b_nn_dist = jet_b.nn_dist();
-                        let a_idx = Some(jet_a.borrow().bj_jet_index);
-                        let b_idx = Some(jet_b.borrow().bj_jet_index);
-
-                        if dist < a_nn_dist {
-                            let mut a = jet_a.borrow_mut();
-                            a.set_nn_dist(dist);
-                            a.set_nn_jet(b_idx);
-                        }
-                        if dist < b_nn_dist {
-                            let mut b = jet_b.borrow_mut();
-                            b.set_nn_dist(dist);
-                            b.set_nn_jet(a_idx);
-                        }
+                        ClusterSequence::update_pair_nn(&jet_a, &jet_b);
                         jet_b_next = jet_b.borrow().next_jet.clone();
                     }
                     jet_a_next = jet_a.borrow().next_jet.clone();
@@ -1023,10 +1002,10 @@ impl ClusterSequence {
                         jet_i.borrow_mut().nn_dist = self.r2;
                         jet_i.borrow_mut().nn_jet_index = None;
                         // now find new NN in all tiles
-                        for near_tile_idx in tile.begin_tiles {
+                        for near_tile_idx in &tile.begin_tiles[0..tile.begin_len] {
                             // now go through bj over all jets in each tile
                             let mut jet_j_next =
-                                self.tiles_struct._tiles[near_tile_idx].head.clone();
+                                self.tiles_struct._tiles[*near_tile_idx].head.clone();
                             while let Some(jet_j) = jet_j_next {
                                 let dist = TiledJet::_bj_dist(&jet_i.borrow(), &jet_j.borrow());
                                 if dist < jet_i.nn_dist() && !Rc::ptr_eq(&jet_i, &jet_j) {
@@ -1070,10 +1049,9 @@ impl ClusterSequence {
             }
 
             // update all pointers of old tail tiles
-            for near_tiled_idx in
-                self.tiles_struct._tiles[bj_jets[end_idx].borrow().tile_index].begin_tiles
-            {
-                let near_tile = &self.tiles_struct._tiles[near_tiled_idx];
+            let tiles = &self.tiles_struct._tiles[bj_jets[end_idx].borrow().tile_index];
+            for near_tiled_idx in &tiles.begin_tiles[0..tiles.begin_len] {
+                let near_tile = &self.tiles_struct._tiles[*near_tiled_idx];
                 let mut jet_j_next = near_tile.head.clone();
                 while let Some(jet_j) = jet_j_next {
                     if jet_j.borrow().nn_jet_index == Some(end_idx) {
