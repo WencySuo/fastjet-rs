@@ -285,9 +285,8 @@ impl ClusterSequence {
                 //TODO: implement best strategy
             }
             Strategy::N2Plain => {
-                //TODO: add some logic here to determine which jettype to use
-                // add simd logic here
-
+                //TODO: simd can only be used with BriefJets that are not EE
+                // explicitly include these checks in the future
                 #[cfg(feature = "simd")]
                 self.simple_n2_cluster_simd();
 
@@ -1148,36 +1147,6 @@ impl ClusterSequence {
         kt2_arr: &[f64],
         di_j: &mut [f64],
     ) {
-        // can obtain simd vectors from slices, just need to handle remainder
-        // for non SIMD vectors we need to init one whole array to vectorize
-        // for remainder we can just ignore and run regular scalar algorithm
-
-        // however if jet does not have NN we must set to f64::max for getting min
-        // thus we need nn_array, nn_dist array
-        // range to consider
-        // rap_array, phi_array, R2 as splat (constant)
-        // handle the dist function with these array
-
-        // let n = bj_jets.len();
-        // let mut rap_array = Vec::with_capacity(n);
-        // let mut phi_array = Vec::with_capacity(n);
-        // let mut nn_array = Vec::with_capacity(n);
-        // let mut nn_dist_array = Vec::with_capacity(n);
-        // let mut kt2_array = Vec::with_capacity(n);
-
-        // // push all vectors now
-        // bj_jets.iter().enumerate().for_each(|(i, jet)| {
-        //     rap_array.push(jet.eta());
-        //     phi_array.push(jet.phi());
-        //     nn_array.push(jet.nn_jet_index().unwrap_or_else(|| i) as u64);
-        //     nn_dist_array.push(jet.nn_dist());
-        //     kt2_array.push(jet.kt2());
-        // });
-
-        // now we can acc call SIMD func
-        //
-        // define a const for lanes
-
         const LANES: usize = 16;
         let n = rap_arr.len();
         for i in 1..n {
@@ -1191,24 +1160,9 @@ impl ClusterSequence {
                 nn_dist_arr,
                 nn_arr,
             );
-            // // we still need to handle remainder
-            // // j does not return i
-            // for remainder_idx in j..=i {
-            //     self.bj_set_nn_crosscheck(&mut bj_jets[0..=remainder_idx]);
-            // }
         }
 
         ClusterSequence::_dij_simd::<LANES>(&kt2_arr, &nn_arr, &nn_dist_arr, di_j);
-
-        // //now go through all bj jets and set nn and nndist
-        // bj_jets.iter_mut().enumerate().for_each(|(i, jet)| {
-        //     jet.set_nn_dist(nn_dist_array[i]);
-        //     jet.set_nn_jet(if nn_array[i] as usize != i {
-        //         Some(nn_array[i] as usize)
-        //     } else {
-        //         None
-        //     });
-        // });
     }
 
     #[inline(always)]
@@ -1294,95 +1248,6 @@ impl ClusterSequence {
         nn_arr[i] = nn_min;
     }
 
-    // #[inline(always)]
-    // #[cfg(feature = "simd")]
-    // pub fn set_nn_nocross_simd<const LANES: usize>(
-    //     i: usize,
-    //     start: usize,
-    //     end: usize,
-    //     rap_arr: &[f64],
-    //     phi_arr: &[f64],
-    //     r2: f64,
-    //     nn_dist_arr: &mut [f64],
-    //     nn_arr: &mut [u64],
-    // ) {
-    //     let rap_i = rap_arr[i];
-
-    //     let phi_i = phi_arr[i];
-
-    //     let mut j = start;
-
-    //     // SIMD state: best candidate for i across all processed j's
-    //     let mut best_d2 = Simd::<f64, LANES>::splat(r2);
-    //     let mut best_j = Simd::<u64, LANES>::splat(i as u64);
-
-    //     // constant lane offsets [0,1,2,...]
-    //     let lane_offsets: Simd<u64, LANES> = Simd::from_array(std::array::from_fn(|k| k as u64));
-
-    //     let i_u64 = i as u64;
-    //     let i_vec = Simd::<u64, LANES>::splat(i_u64);
-    //     let inf = Simd::<f64, LANES>::splat(f64::INFINITY);
-
-    //     let pi = Simd::<f64, LANES>::splat(std::f64::consts::PI);
-    //     let two_pi = Simd::<f64, LANES>::splat(2.0 * std::f64::consts::PI);
-
-    //     while j + LANES <= (end + 1) {
-    //         let rap_j = Simd::<f64, LANES>::from_slice(&rap_arr[j..j + LANES]);
-    //         let phi_j = Simd::<f64, LANES>::from_slice(&phi_arr[j..j + LANES]);
-    //         let mut dist =
-    //             ClusterSequence::bj_dist_simd_direct(rap_i, phi_i, rap_j, phi_j, pi, two_pi);
-    //         // 1) Update best candidate for i (vector select)
-    //         let idx = Simd::<u64, LANES>::splat(j as u64) + lane_offsets;
-
-    //         let is_self = idx.simd_eq(i_vec);
-    //         dist = is_self.select(inf, dist);
-
-    //         let better_for_i = dist.simd_lt(best_d2);
-    //         best_d2 = better_for_i.select(dist, best_d2);
-    //         best_j = better_for_i.select(idx, best_j);
-
-    //         j += LANES;
-    //     }
-
-    //     let mut nndist_min = r2;
-    //     let mut nn_min = i as u64;
-
-    //
-    //     while j <= end {
-    //         if j == i {
-    //             j += 1;
-    //             continue;
-    //         }
-    //         let drap = rap_i - rap_arr[j];
-    //         let mut dphi = (phi_i - phi_arr[j]).abs();
-    //         if dphi > PI {
-    //             dphi = 2.0 * PI - dphi
-    //         }
-    //         let d2 = drap.mul_add(drap, dphi * dphi);
-
-    //         // update i's best (scalar for tail)
-    //         if d2 < nndist_min {
-    //             nndist_min = d2;
-    //             nn_min = j as u64;
-    //         }
-
-    //         j += 1;
-    //     }
-
-    //     //Final horizontal reduction once
-    //     let bd = best_d2.to_array();
-    //     let bj = best_j.to_array();
-    //     for lane in 0..LANES {
-    //         if bd[lane] < nndist_min {
-    //             nndist_min = bd[lane];
-    //             nn_min = bj[lane];
-    //         }
-    //     }
-
-    //     nn_dist_arr[i] = nndist_min;
-    //     nn_arr[i] = nn_min;
-    // }
-
     #[inline(always)]
     #[cfg(feature = "simd")]
     pub fn set_nn_crosscheck_simd<const LANES: usize>(
@@ -1401,7 +1266,6 @@ impl ClusterSequence {
 
         let mut j = start;
 
-        // SIMD state: best candidate for i across all processed j's
         let mut best_d2 = Simd::<f64, LANES>::splat(r2);
         let mut best_j = Simd::<u64, LANES>::splat(i as u64);
 
@@ -1446,7 +1310,6 @@ impl ClusterSequence {
         let mut nndist_min = r2;
         let mut nn_min = i as u64;
 
-        //handle the tail/remainder of non simd aligned lanes regularly
         while j <= end {
             if j == i {
                 j += 1;
@@ -1459,13 +1322,11 @@ impl ClusterSequence {
             }
             let d2 = drap.mul_add(drap, dphi * dphi);
 
-            // update i's best (scalar for tail)
             if d2 < nndist_min {
                 nndist_min = d2;
                 nn_min = j as u64;
             }
 
-            // cross-check update (scalar for tail)
             if d2 < nndist_arr[j] {
                 nndist_arr[j] = d2;
                 nn_arr[j] = i as u64;
@@ -1474,7 +1335,6 @@ impl ClusterSequence {
             j += 1;
         }
 
-        //Final horizontal reduction once
         let bd = best_d2.to_array();
         let bj = best_j.to_array();
         for lane in 0..LANES {
@@ -1486,30 +1346,6 @@ impl ClusterSequence {
 
         nndist_arr[i] = nndist_min;
         nn_arr[i] = nn_min;
-    }
-
-    #[inline]
-    #[cfg(feature = "simd")]
-    fn bj_dist_simd<const LANES: usize>(
-        rap_i: f64,
-        phi_i: f64,
-        rap_j: Simd<f64, LANES>,
-        phi_j: Simd<f64, LANES>,
-    ) -> Simd<f64, LANES> {
-        //splat to match lane size
-        let rap_i = Simd::splat(rap_i);
-        let phi_i = Simd::splat(phi_i);
-
-        let drap = rap_i - rap_j;
-
-        let mut dphi = (phi_i - phi_j).abs();
-        let pi = Simd::splat(PI);
-        let two_pi = Simd::splat(2.0 * PI);
-
-        let mask = dphi.simd_gt(pi);
-        dphi = mask.select(two_pi - dphi, dphi);
-
-        dphi.mul_add(dphi, drap * drap)
     }
 
     #[inline(always)]
@@ -1535,109 +1371,18 @@ impl ClusterSequence {
         dphi.mul_add(dphi, drap * drap)
     }
 
-    #[inline]
-    #[cfg(feature = "simd")]
-    fn bj_dist_simd_indexed(i_idx: usize, j_idx: usize, rap_arr: &[f64], phi_arr: &[f64]) -> f64 {
-        let drap = rap_arr[i_idx] - rap_arr[j_idx];
-
-        let mut dphi = (phi_arr[i_idx] - phi_arr[j_idx]).abs();
-
-        dphi = if dphi > PI { 2.0 * PI - dphi } else { dphi };
-
-        dphi.mul_add(dphi, drap * drap)
-    }
-
-    // #[inline(always)]
-    // #[cfg(feature = "simd")]
-    // fn _dij_simd<const LANES: usize>(
-    //     kt2_arr: &[f64],
-    //     nn_idx: &[u64],
-    //     nn_dist: &[f64],
-    //     di_j: &mut [f64],
-    // ) {
-    //     let n = kt2_arr.len();
-    //     let mut j = 0;
-
-    //     // Because alignment is confirmed 0, the prefix in as_simd() will be empty.
-    //     // We can iterate through the aligned chunks directly.
-    //     while j + (LANES * 2) <= n {
-    //
-    //         unsafe {
-    //             // Perfect Aligned Loads via pointer casting
-    //             let kt2_i1 = *(kt2_arr.as_ptr().add(j) as *const Simd<f64, LANES>);
-    //             let dist_i1 = *(nn_dist.as_ptr().add(j) as *const Simd<f64, LANES>);
-
-    //             // Indices must still be gathered (the random access part)
-    //             let mut kt2_b_vals1 = [0.0; LANES];
-    //             for lane in 0..LANES {
-    //                 let b_idx = *nn_idx.get_unchecked(j + lane) as usize;
-    //                 kt2_b_vals1[lane] = *kt2_arr.get_unchecked(b_idx);
-    //             }
-    //             let kt2_b1 = Simd::from_array(kt2_b_vals1);
-
-    //             let res1 = kt2_i1.simd_min(kt2_b1) * dist_i1;
-    //             // Aligned Store
-    //             *(di_j.as_mut_ptr().add(j) as *mut Simd<f64, LANES>) = res1;
-    //         }
-
-    //         let j2 = j + LANES;
-    //         unsafe {
-    //             let kt2_i2 = *(kt2_arr.as_ptr().add(j2) as *const Simd<f64, LANES>);
-    //             let dist_i2 = *(nn_dist.as_ptr().add(j2) as *const Simd<f64, LANES>);
-
-    //             let mut kt2_b_vals2 = [0.0; LANES];
-    //             for lane in 0..LANES {
-    //                 let b_idx = *nn_idx.get_unchecked(j2 + lane) as usize;
-    //                 kt2_b_vals2[lane] = *kt2_arr.get_unchecked(b_idx);
-    //             }
-    //             let kt2_b2 = Simd::from_array(kt2_b_vals2);
-
-    //             let res2 = kt2_i2.simd_min(kt2_b2) * dist_i2;
-    //             *(di_j.as_mut_ptr().add(j2) as *mut Simd<f64, LANES>) = res2;
-    //         }
-
-    //         j += LANES * 2;
-    //     }
-
-    //
-    //     while j + LANES <= n {
-    //         unsafe {
-    //             let kt2_i = *(kt2_arr.as_ptr().add(j) as *const Simd<f64, LANES>);
-    //             let dist_i = *(nn_dist.as_ptr().add(j) as *const Simd<f64, LANES>);
-
-    //             let mut kt2_b_vals = [0.0; LANES];
-    //             for lane in 0..LANES {
-    //                 let b_idx = *nn_idx.get_unchecked(j + lane) as usize;
-    //                 kt2_b_vals[lane] = *kt2_arr.get_unchecked(b_idx);
-    //             }
-    //             let res = kt2_i.simd_min(Simd::from_array(kt2_b_vals)) * dist_i;
-    //             *(di_j.as_mut_ptr().add(j) as *mut Simd<f64, LANES>) = res;
-    //         }
-    //         j += LANES;
-    //     }
-
-    //
-    //     for i in j..n {
-    //         unsafe {
-    //             let b = *nn_idx.get_unchecked(i) as usize;
-    //             let kt2_min = f64::min(*kt2_arr.get_unchecked(i), *kt2_arr.get_unchecked(b));
-    //             *di_j.get_unchecked_mut(i) = *nn_dist.get_unchecked(i) * kt2_min;
-    //         }
-    //     }
-    // }
     #[inline(always)]
     #[cfg(feature = "simd")]
     fn _dij_simd<const LANES: usize>(
-        kt2_arr: &[f64],  // All kt2 values
-        nn_idx: &[u64],   // Neighbor indices
-        nn_dist: &[f64],  // Neighbor distances
-        di_j: &mut [f64], // Output
+        kt2_arr: &[f64],
+        nn_idx: &[u64],
+        nn_dist: &[f64],
+        di_j: &mut [f64],
     ) {
         let n = kt2_arr.len();
         let mut j = 0;
 
         while j + LANES <= n {
-            // 1. Load data from slices into registers
             let kt2_i = Simd::<f64, LANES>::from_slice(&kt2_arr[j..j + LANES]);
             let dist_i = Simd::<f64, LANES>::from_slice(&nn_dist[j..j + LANES]);
             let indices = Simd::<u64, LANES>::from_slice(&nn_idx[j..j + LANES]);
@@ -1654,18 +1399,10 @@ impl ClusterSequence {
             j += LANES;
         }
 
-        // Scalar tail handling
         for i in j..n {
             let idx = nn_idx[i] as usize;
             di_j[i] = nn_dist[i] * kt2_arr[i].min(kt2_arr[idx]);
         }
-    }
-
-    #[inline]
-    #[cfg(feature = "simd")]
-    fn _dij_simd_indexed(jet_idx: usize, kt2_arr: &[f64], nn_idx: &[u64], nn_dist: &[f64]) -> f64 {
-        // since we init NN dist as self.r2 this should not be a problem
-        nn_dist[jet_idx] * kt2_arr[jet_idx].min(kt2_arr[nn_idx[jet_idx] as usize])
     }
 
     #[inline(always)]
@@ -1681,6 +1418,7 @@ impl ClusterSequence {
     }
 
     #[inline(always)]
+    #[cfg(feature = "simd")]
     fn update_neighbors_recombined_full_simd<const LANES: usize>(
         &self,
         ctx: &mut ClusterContext,
@@ -1807,6 +1545,7 @@ impl ClusterSequence {
     }
 
     #[inline(always)]
+    #[cfg(feature = "simd")]
     fn update_neighbors_beam_simd<const LANES: usize>(
         &self,
         ctx: &mut ClusterContext,
@@ -1855,8 +1594,6 @@ impl ClusterSequence {
         let mut particles_index: Vec<usize> = (0..n).collect();
         let mut buffer = ClusterBuffer::new(n);
         let mut ctx = buffer.get_context();
-        //let addr = ctx.rap.as_ptr() as usize;
-        //println!("Alignment offset: {}", addr % 64);
 
         let r2 = self.r2;
         let algo = &self.jetdef.algorithm;
@@ -1888,18 +1625,10 @@ impl ClusterSequence {
             ctx.di_j,
         );
 
-        // println!("size of arr is {}", rap_array.len());
-        // println!("NN Array: {:?}", nn_dist_array);
-        // println!("NN Dist Array: {:?}", nn_dist_array);
-        // println!("KT2 Array: {:?}", kt2_array);
-        // println!("DIJ Array: {:?}", di_j);
-
         // begin looping thru entire vector
 
         for i in 0..n {
             //find min distance
-            //
-            // THIS stays in the same since only using di_j
             let end_idx = n - 1 - i;
             let (mut min_idx, min_dij) = ctx
                 .di_j
@@ -1909,12 +1638,6 @@ impl ClusterSequence {
                 .min_by_key(|a| a.1.to_bits())
                 .unwrap();
 
-            // looking for dist so just look at nn_dist arr
-            // and jet_a is just min_idx and if jet_b idx is itself then its None
-            // let jet_a = &bj_jets[min_idx];
-            // let mut jet_b_idx = jet_a.nn_jet_index(); //THIS IS AN OPTION
-            //
-            // now remove the option since it computationally expensive
             let mut jet_b_idx = ctx.nn_idx[min_idx] as usize;
 
             // normalize
@@ -1928,14 +1651,6 @@ impl ClusterSequence {
                 // nn is the new index we want to store the recombined index at
                 // modify jetB for BJ with new info
 
-                //given we are removing J:Proxyjet creation
-                // and removing needing to pass all the arrs we can
-                // just do jj recomb more simply inside func
-                // let new_bj = self.do_jet_jet_recombination_step(
-                //     particles_index[min_idx],
-                //     particles_index[_jet_b_idx],
-                //     min_dij,
-                // );
                 let jet_i = &self.particles[particles_index[min_idx]];
                 let jet_j = &self.particles[particles_index[jet_b_idx]];
 
@@ -1967,7 +1682,6 @@ impl ClusterSequence {
                     min_dij,
                 );
             } else {
-                //jetbeam was alr simple just paste here
                 self.add_recomb_to_history(
                     self.particles[particles_index[min_idx]].cluster_hist_index(),
                     BEAMJET,
@@ -1976,11 +1690,6 @@ impl ClusterSequence {
                 );
             };
 
-            //moves recombined min_idx with potential new NN jet at end_idx
-            //copy tail values to jetA
-            // bj_jets.swap(min_idx, end_idx);
-            // di_j.swap(min_idx, end_idx);
-            // have to change all array values now
             if min_idx != end_idx {
                 ctx.rap[min_idx] = ctx.rap[end_idx];
                 ctx.phi[min_idx] = ctx.phi[end_idx];
@@ -1991,21 +1700,6 @@ impl ClusterSequence {
                 particles_index[min_idx] = particles_index[end_idx];
             }
 
-            // no longer necessary with this code since we are manually changing all elements
-            // //check entire list and update NN of references to new jet
-            // //very slow O(n) each time, compared to implicit pointer copying in C++
-            // for jet in bj_jets.iter_mut().take(end_idx) {
-            //     if jet.nn_jet_index() == Some(end_idx) {
-            //         jet.set_nn_jet(Some(min_idx));
-            //     }
-            // }
-
-            // for nn_jets_idx in 0..nn_array.len() {
-            //     if nn_array[nn_jets_idx] as usize == end_idx {
-            //         nn_array[nn_jets_idx] = min_idx as u64;
-            //     }
-            // }
-
             let tail = end_idx;
 
             if jet_b_idx != min_idx {
@@ -2015,106 +1709,9 @@ impl ClusterSequence {
             } else {
                 self.update_neighbors_beam_simd::<LANES>(&mut ctx, min_idx, tail, tail);
             }
-
-            // // find all NN of recombined jet_b
-            // let tail = end_idx;
-            // if jet_b_idx != min_idx {
-            //     for i in 0..tail {
-            //         // see if jetI had jetA or jetB as a NN if so recalc NN
-            //         if ctx.nn_idx[i] as usize == min_idx || ctx.nn_idx[i] as usize == jet_b_idx {
-            //             //self.bj_set_nn_nocross(i, 0, tail, &mut bj_jets[0..tail]);
-            //             ClusterSequence::set_nn_nocross_simd::<LANES>(
-            //                 i,
-            //                 0,
-            //                 tail - 1,
-            //                 &ctx.rap,
-            //                 &ctx.phi,
-            //                 self.r2,
-            //                 ctx.nn_dist,
-            //                 ctx.nn_idx,
-            //             );
-            //             ctx.di_j[i] = ClusterSequence::_dij_simd_indexed(
-            //                 i,
-            //                 &ctx.kt2,
-            //                 &ctx.nn_idx,
-            //                 &ctx.nn_dist,
-            //             )
-            //         }
-
-            //         if jet_b_idx == i {
-            //             //dont need to set bj_jets now
-            //             //let jet_i = &mut bj_jets[i];
-            //             if ctx.nn_idx[i] as usize == tail {
-            //                 ctx.nn_idx[i] = min_idx as u64;
-            //             }
-            //             continue;
-            //         }
-
-            //         let jet_ib_dist =
-            //             ClusterSequence::bj_dist_simd_indexed(i, jet_b_idx, &ctx.rap, &ctx.phi);
-
-            //         if jet_ib_dist < ctx.nn_dist[i] {
-            //             ctx.nn_dist[i] = jet_ib_dist;
-            //             ctx.nn_idx[i] = jet_b_idx as u64;
-            //             ctx.di_j[i] = ClusterSequence::_dij_simd_indexed(
-            //                 i,
-            //                 &ctx.kt2,
-            //                 &ctx.nn_idx,
-            //                 &ctx.nn_dist,
-            //             )
-            //         }
-
-            //         // check if jetI is potentially jetB's NN
-            //         if jet_ib_dist < ctx.nn_dist[jet_b_idx] {
-            //             ctx.nn_dist[jet_b_idx] = jet_ib_dist;
-            //             ctx.nn_idx[jet_b_idx] = i as u64;
-            //         }
-
-            //         // if jetI's NN is the new tail then relabel so it becomes jetA?
-            //         if ctx.nn_idx[i] as usize == tail {
-            //             ctx.nn_idx[i] = min_idx as u64;
-            //         }
-            //     }
-            //     // update new bj_dij for jetB in diJ arr
-            //     ctx.di_j[jet_b_idx] = ClusterSequence::_dij_simd_indexed(
-            //         jet_b_idx,
-            //         &ctx.kt2,
-            //         &ctx.nn_idx,
-            //         &ctx.nn_dist,
-            //     )
-            // } else {
-            //     //check if old JetA was NN to jet being mapped
-            //     for i in 0..tail {
-            //         if i as u64 != ctx.nn_idx[i] {
-            //             if ctx.nn_idx[i] as usize == min_idx {
-            //                 ClusterSequence::set_nn_nocross_simd::<LANES>(
-            //                     i,
-            //                     0,
-            //                     tail - 1,
-            //                     &ctx.rap,
-            //                     &ctx.phi,
-            //                     self.r2,
-            //                     ctx.nn_dist,
-            //                     ctx.nn_idx,
-            //                 );
-            //                 ctx.di_j[i] = ClusterSequence::_dij_simd_indexed(
-            //                     i,
-            //                     &ctx.kt2,
-            //                     &ctx.nn_idx,
-            //                     &ctx.nn_dist,
-            //                 )
-            //             }
-            //             //if jet has NN of tail then used to be jetA
-            //             if ctx.nn_idx[i] as usize == end_idx {
-            //                 ctx.nn_idx[i] = min_idx as u64;
-            //             }
-            //         }
-            //     }
-            // }
         }
     }
 
-    // TODO: change from briefjets to generic ProxyJet class
     pub fn simple_n2_cluster<J: ProxyJet>(&mut self) {
         let n = self.particles.len();
 
@@ -2136,32 +1733,8 @@ impl ClusterSequence {
             bj_jets.push(bj);
         });
 
-        // only add cfg_if when we acc implement simd feature
-        // cfg_if! {
-        //         if #[cfg(crate = "f64_SIMD")] {
-        //             set_nn_info_simd(&mut bj_jets[0..=i], i)
-        //         } else {
-        //             for i in 1..n {
-        //                 self.bj_set_nn_crosscheck(&mut bj_jets[0..=i]);
-        //             }
-        //         }
-        //     }
-        // // cand for simd
-
-        // self.set_nn_bj_vec_simd(&mut bj_jets);
-        //
-        //self.set_nn_bj_vec_simd_and_dij(&mut bj_jets);
-
-        // for i in 1..n {
-        //     self.bj_set_nn_crosscheck(&mut bj_jets[0..=i]);
-        // }
-
         let mut di_j: Vec<f64> = vec![0.0; n];
         self.set_nn_and_dij(&mut bj_jets, &mut di_j);
-
-        // di_j.iter_mut().enumerate().for_each(|(i, jet)| {
-        //     *jet = J::_bj_dij(&bj_jets[i], &bj_jets);
-        // });
 
         for i in 0..n {
             //find min distance
