@@ -3,20 +3,20 @@ use crate::pseudo_jet::PseudoJet;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct BriefJet {
     pub eta: f64,
     pub phi: f64,
     pub kt2: f64,
     pub nn_dist: f64, // either nn_dist == option, or only read dist if nn_jet != None
-    pub nn_jet_index: Option<usize>, //TODO: investigate if box is best way to do this
+    pub nn_jet_index: usize, //TODO: investigate if box is best way to do this
     pub particle_index: usize, // either index == option, or only read index if nn_jet != None
 }
 
 pub struct EEBriefJet {
     pub kt2: f64,
     pub nn_dist: f64, // either nn_dist == option, or only read dist if nn_jet != None
-    pub nn_jet_index: Option<usize>,
+    pub nn_jet_index: usize,
     pub particle_index: usize, // either index == option, or only read index if nn_jet != None
     pub nx: f64,
     pub ny: f64,
@@ -39,7 +39,7 @@ pub struct TiledJet {
     pub phi: f64,
     pub kt2: f64,
     pub nn_dist: f64, // either nn_dist == option, or only read dist if nn_jet != None
-    pub nn_jet_index: Option<usize>, //TODO: investigate if box is best way to do this
+    pub nn_jet_index: usize, //TODO: investigate if box is best way to do this
     pub particle_index: usize, // either index == option, or only read index if nn_jet != None
     pub bj_jet_index: usize,
     pub tile_index: usize,
@@ -108,7 +108,7 @@ impl ProxyJet for TiledJet {
     }
 
     #[inline]
-    fn nn_jet_index(&self) -> Option<usize> {
+    fn nn_jet_index(&self) -> usize {
         self.nn_jet_index
     }
 
@@ -118,7 +118,7 @@ impl ProxyJet for TiledJet {
     }
 
     #[inline]
-    fn set_nn_jet(&mut self, jet_index: Option<usize>) {
+    fn set_nn_jet(&mut self, jet_index: usize) {
         self.nn_jet_index = jet_index;
     }
 
@@ -129,13 +129,19 @@ impl ProxyJet for TiledJet {
         dphi * dphi + deta * deta
     }
 
-    fn _bj_set_jetinfo(index: usize, pseudo_jet: &PseudoJet, r2: f64, kt2: f64) -> TiledJet {
+    fn _bj_set_jetinfo(
+        index: usize,
+        pseudo_jet: &PseudoJet,
+        r2: f64,
+        kt2: f64,
+        nn_jet_idx: usize,
+    ) -> TiledJet {
         TiledJet {
-            eta: *pseudo_jet.rap(),
-            phi: *pseudo_jet.phi(),
+            eta: pseudo_jet.rap(),
+            phi: pseudo_jet.phi(),
             kt2,
             nn_dist: r2,
-            nn_jet_index: None,
+            nn_jet_index: nn_jet_idx,
             // at init paritlc_index and bj_jet_index should be the same
             particle_index: index,
             bj_jet_index: index,
@@ -169,7 +175,7 @@ impl ProxyJet for Rc<RefCell<TiledJet>> {
     }
 
     #[inline]
-    fn nn_jet_index(&self) -> Option<usize> {
+    fn nn_jet_index(&self) -> usize {
         self.borrow().nn_jet_index
     }
 
@@ -184,7 +190,7 @@ impl ProxyJet for Rc<RefCell<TiledJet>> {
     }
 
     #[inline]
-    fn set_nn_jet(&mut self, jet_index: Option<usize>) {
+    fn set_nn_jet(&mut self, jet_index: usize) {
         self.borrow_mut().nn_jet_index = jet_index;
     }
 
@@ -207,9 +213,15 @@ impl ProxyJet for Rc<RefCell<TiledJet>> {
         TiledJet::_bj_dist(&a, &b)
     }
 
-    fn _bj_set_jetinfo(index: usize, pseudo_jet: &PseudoJet, r2: f64, kt2: f64) -> Self {
+    fn _bj_set_jetinfo(
+        index: usize,
+        pseudo_jet: &PseudoJet,
+        r2: f64,
+        kt2: f64,
+        nn_jet_idx: usize,
+    ) -> Self {
         Rc::new(RefCell::new(TiledJet::_bj_set_jetinfo(
-            index, pseudo_jet, r2, kt2,
+            index, pseudo_jet, r2, kt2, nn_jet_idx,
         )))
     }
 }
@@ -278,26 +290,33 @@ pub trait ProxyJet {
     fn create_jet_type(&'_ self) -> JetType<'_>;
 
     //TODO: how to call different types of jet types
-    fn nn_jet_index(&self) -> Option<usize>;
+    fn nn_jet_index(&self) -> usize;
 
     fn nn_dist(&self) -> f64;
 
     fn set_nn_dist(&mut self, dist: f64);
 
-    fn set_nn_jet(&mut self, jet_index: Option<usize>);
+    fn set_nn_jet(&mut self, jet_index: usize);
 
     fn _bj_dist(jet_a: &Self, jet_b: &Self) -> f64;
 
-    #[inline]
+    #[inline(always)]
     fn _bj_dij<J: ProxyJet>(jet: &J, jets: &[J]) -> f64 {
-        jet.nn_dist()
-            * jet.kt2().min(
-                jet.nn_jet_index()
-                    .map(|index| jets[index].kt2())
-                    .unwrap_or(f64::MAX),
-            )
+        let kt2_a = jet.kt2();
+        let kt2_b = jets[jet.nn_jet_index()].kt2();
+
+        // Bypasses the f64::min NaN checks, yielding pure hardware speed
+        let min_kt2 = if kt2_a < kt2_b { kt2_a } else { kt2_b };
+
+        jet.nn_dist() * min_kt2
     }
-    fn _bj_set_jetinfo(index: usize, pseudo_jet: &PseudoJet, r2: f64, kt2: f64) -> Self;
+    fn _bj_set_jetinfo(
+        index: usize,
+        pseudo_jet: &PseudoJet,
+        r2: f64,
+        kt2: f64,
+        nn_jet_idx: usize,
+    ) -> Self;
 }
 
 pub enum JetType<'a> {
@@ -349,7 +368,7 @@ impl ProxyJet for BriefJet {
     }
 
     #[inline]
-    fn nn_jet_index(&self) -> Option<usize> {
+    fn nn_jet_index(&self) -> usize {
         self.nn_jet_index
     }
 
@@ -359,7 +378,7 @@ impl ProxyJet for BriefJet {
     }
 
     #[inline]
-    fn set_nn_jet(&mut self, jet_index: Option<usize>) {
+    fn set_nn_jet(&mut self, jet_index: usize) {
         self.nn_jet_index = jet_index;
     }
 
@@ -372,14 +391,20 @@ impl ProxyJet for BriefJet {
         dphi.mul_add(dphi, deta * deta)
     }
 
-    fn _bj_set_jetinfo(index: usize, pseudo_jet: &PseudoJet, r2: f64, kt2: f64) -> BriefJet {
+    fn _bj_set_jetinfo(
+        index: usize,
+        pseudo_jet: &PseudoJet,
+        r2: f64,
+        kt2: f64,
+        nn_jet_idx: usize,
+    ) -> BriefJet {
         BriefJet {
-            eta: *pseudo_jet.rap(),
-            phi: *pseudo_jet.phi(),
+            eta: pseudo_jet.rap(),
+            phi: pseudo_jet.phi(),
             kt2,
             particle_index: index,
             nn_dist: r2,
-            nn_jet_index: None,
+            nn_jet_index: nn_jet_idx,
         }
     }
 }
@@ -445,7 +470,7 @@ impl ProxyJet for EEBriefJet {
         self.nn_dist
     }
 
-    fn nn_jet_index(&self) -> Option<usize> {
+    fn nn_jet_index(&self) -> usize {
         self.nn_jet_index
     }
 
@@ -455,7 +480,7 @@ impl ProxyJet for EEBriefJet {
     }
 
     #[inline]
-    fn set_nn_jet(&mut self, jet_index: Option<usize>) {
+    fn set_nn_jet(&mut self, jet_index: usize) {
         self.nn_jet_index = jet_index;
     }
 
@@ -465,7 +490,13 @@ impl ProxyJet for EEBriefJet {
         dist * 2.0
     }
 
-    fn _bj_set_jetinfo(index: usize, pseudo_jet: &PseudoJet, r2: f64, kt2: f64) -> EEBriefJet {
+    fn _bj_set_jetinfo(
+        index: usize,
+        pseudo_jet: &PseudoJet,
+        r2: f64,
+        kt2: f64,
+        nn_jet_idx: usize,
+    ) -> EEBriefJet {
         let mut norm = pseudo_jet.modp2();
         let mut nx = 0.0;
         let mut ny = 0.0;
@@ -480,7 +511,7 @@ impl ProxyJet for EEBriefJet {
             kt2,
             particle_index: index,
             nn_dist: r2,
-            nn_jet_index: None,
+            nn_jet_index: nn_jet_idx,
             nx,
             ny,
             nz,
