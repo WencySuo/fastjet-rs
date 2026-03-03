@@ -12,16 +12,25 @@ env:
 jobs:
   build:
     runs-on: ubuntu-latest
-
+    strategy:
+      matrix:
+        toolchain:
+          - stable
+          - nightly
     steps:
       - uses: actions/checkout@v4
-      - name: Build without features
+      - name: Setup Rust
+      - run: rustup update ${{ matrix.toolchain }} && rustup default ${{ matrix.toolchain }}
+      - name: Build (default features)
         run: cargo build --verbose
-      - name: Build all features
-        run: cargo build --all-features
-      - name: Run tests
+      - name: Build (nightly)
+        if: matrix.toolchain == 'nightly'
+        run: cargo build --all-features --verbose
+      - name: Tests
         run: cargo test --verbose
-      - name: Run Lints
-        run: |
-          cargo clippy --all-features
-          cargo clippy
+      - name: Clippy (all features)
+        if: matrix.toolchain == 'nightly'
+        run: cargo clippy --all-features -- -D warnings
+      - name: Clippy (default features)
+        if: matrix.toolchain != 'nightly'
+        run: cargo clippy -- -D warnings
