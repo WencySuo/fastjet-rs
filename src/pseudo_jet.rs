@@ -362,8 +362,8 @@ impl ops::AddAssign<PseudoJet> for PseudoJet {
         self._E += other._E;
 
         self._kt2 = self._px.mul_add(self._px, self._py * self._py);
-        self._rap = PseudoJet::calc_eta(&self);
-        self._phi = PseudoJet::calc_phi(&self);
+        self._rap = PseudoJet::calc_eta(self);
+        self._phi = PseudoJet::calc_phi(self);
     }
 }
 
@@ -389,8 +389,8 @@ impl ops::SubAssign<PseudoJet> for PseudoJet {
         self._E -= other._E;
 
         self._kt2 = self._px.mul_add(self._px, self._py * self._py);
-        self._rap = PseudoJet::calc_eta(&self);
-        self._phi = PseudoJet::calc_phi(&self);
+        self._rap = PseudoJet::calc_eta(self);
+        self._phi = PseudoJet::calc_phi(self);
     }
 }
 
@@ -423,8 +423,8 @@ impl ops::MulAssign<f64> for PseudoJet {
         self._pz *= scalar;
         self._E *= scalar;
         self._kt2 = self._px.mul_add(self._px, self._py * self._py);
-        self._rap = PseudoJet::calc_eta(&self);
-        self._phi = PseudoJet::calc_phi(&self);
+        self._rap = PseudoJet::calc_eta(self);
+        self._phi = PseudoJet::calc_phi(self);
     }
 }
 

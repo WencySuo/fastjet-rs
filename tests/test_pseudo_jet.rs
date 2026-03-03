@@ -1,7 +1,7 @@
 #[cfg(test)]
 mod tests {
     #[cfg(test)]
-    mod tests {
+    mod lorentz_vector_tests {
         use fastjet_rs::pseudo_jet::PseudoJet;
 
         fn approx_eq(a: f64, b: f64) {
@@ -114,7 +114,7 @@ mod tests {
             assert_eq!(c.pz(), 0.5);
             assert_eq!(c.e(), 0.5);
             assert_eq!(c.kt2(), 0.5);
-            assert_eq!(c.phi(), 0.7853981633974483);
+            assert_eq!(c.phi(), std::f64::consts::FRAC_PI_4);
             assert_eq!(c.rap(), 0.34657359027997264);
         }
 
@@ -128,7 +128,7 @@ mod tests {
             assert_eq!(a.pz(), 0.5);
             assert_eq!(a.e(), 0.5);
             assert_eq!(a.kt2(), 0.5);
-            assert_eq!(a.phi(), 0.7853981633974483);
+            assert_eq!(a.phi(), std::f64::consts::FRAC_PI_4);
             assert_eq!(a.rap(), 0.34657359027997264);
         }
 

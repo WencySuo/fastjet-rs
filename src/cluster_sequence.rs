@@ -532,7 +532,7 @@ impl ClusterSequence {
             cum_hi += counts[i] as f64;
             if cum_hi >= allowed_max_cumul {
                 //RHS side of last bin
-                let y = (i as f64 - nrap as f64 + 1.0) as f64;
+                let y = i as f64 - nrap as f64 + 1.0;
                 if y < max_rap {
                     max_rap = y;
                 }
@@ -1067,25 +1067,23 @@ impl ClusterSequence {
         for i in 1..n {
             ClusterSequence::set_nn_crosscheck_simd::<LANES>(
                 i,
-                0,     // from = 0
-                i - 1, // to s= i-1 inclusive
-                &rap_arr,
-                &phi_arr,
+                0..i - 1, // to s= i-1 inclusive
+                rap_arr,
+                phi_arr,
                 self.r2,
                 nn_dist_arr,
                 nn_arr,
             );
         }
 
-        ClusterSequence::_dij_simd::<LANES>(&kt2_arr, &nn_arr, &nn_dist_arr, di_j);
+        ClusterSequence::_dij_simd::<LANES>(kt2_arr, nn_arr, nn_dist_arr, di_j);
     }
 
     #[inline(always)]
     #[cfg(feature = "simd")]
     pub fn set_nn_nocross_simd<const LANES: usize>(
         i: usize,
-        start: usize,
-        end: usize,
+        range: std::ops::Range<usize>,
         rap_arr: &[f64],
         phi_arr: &[f64],
         r2: f64,
@@ -1103,9 +1101,9 @@ impl ClusterSequence {
         let mut best_j = Simd::<u64, LANES>::splat(i as u64);
 
         let lane_offsets = Simd::<u64, LANES>::from_array(std::array::from_fn(|k| k as u64));
-        let mut j = start;
+        let mut j = range.start;
 
-        while j + (LANES * 2) <= (end + 1) {
+        while j + (LANES * 2) <= (range.end + 1) {
             let rap_j1 = Simd::<f64, LANES>::from_slice(&rap_arr[j..j + LANES]);
             let phi_j1 = Simd::<f64, LANES>::from_slice(&phi_arr[j..j + LANES]);
             let idx1 = Simd::<u64, LANES>::splat(j as u64) + lane_offsets;
@@ -1142,7 +1140,7 @@ impl ClusterSequence {
         let mut nn_min = mask.select(best_j, Simd::splat(u64::MAX)).reduce_min();
 
         // handle remaining elements (j..=end)
-        while j <= end {
+        while j <= range.end {
             if j != i {
                 let drap = rap_i - rap_arr[j];
                 let mut dphi = (phi_i - phi_arr[j]).abs();
@@ -1167,8 +1165,7 @@ impl ClusterSequence {
     #[cfg(feature = "simd")]
     pub fn set_nn_crosscheck_simd<const LANES: usize>(
         i: usize,
-        start: usize,
-        end: usize,
+        range: std::ops::Range<usize>,
         rap_arr: &[f64],
         phi_arr: &[f64],
         r2: f64,
@@ -1179,7 +1176,7 @@ impl ClusterSequence {
 
         let phi_i = phi_arr[i];
 
-        let mut j = start;
+        let mut j = range.start;
 
         let mut best_d2 = Simd::<f64, LANES>::splat(r2);
         let mut best_j = Simd::<u64, LANES>::splat(i as u64);
@@ -1194,7 +1191,7 @@ impl ClusterSequence {
         let pi = Simd::<f64, LANES>::splat(std::f64::consts::PI);
         let two_pi = Simd::<f64, LANES>::splat(2.0 * std::f64::consts::PI);
 
-        while j + LANES <= (end + 1) {
+        while j + LANES <= (range.end + 1) {
             let rap_j = Simd::<f64, LANES>::from_slice(&rap_arr[j..j + LANES]);
             let phi_j = Simd::<f64, LANES>::from_slice(&phi_arr[j..j + LANES]);
             let mut dist =
@@ -1225,7 +1222,7 @@ impl ClusterSequence {
         let mut nndist_min = r2;
         let mut nn_min = i as u64;
 
-        while j <= end {
+        while j <= range.end {
             if j == i {
                 j += 1;
                 continue;
@@ -1321,14 +1318,14 @@ impl ClusterSequence {
     }
 
     #[inline(always)]
-    fn set_nn_and_dij<J: ProxyJet>(&mut self, bj_jets: &mut Vec<J>, di_j: &mut Vec<f64>) {
+    fn set_nn_and_dij<J: ProxyJet>(&mut self, bj_jets: &mut [J], di_j: &mut [f64]) {
         let n = bj_jets.len();
         for i in 1..n {
             self.bj_set_nn_crosscheck(&mut bj_jets[0..=i]);
         }
 
         di_j.iter_mut().enumerate().for_each(|(i, jet)| {
-            *jet = J::_bj_dij(&bj_jets[i], &bj_jets);
+            *jet = J::_bj_dij(&bj_jets[i], bj_jets);
         });
     }
 
@@ -1384,7 +1381,7 @@ impl ClusterSequence {
             m_best_nn = better_for_m.select(idx_j, m_best_nn);
 
             let d2_vals = safe_d2.to_array();
-            for lane in 0..LANES {
+            for (lane, d2) in d2_vals.iter().enumerate().take(LANES) {
                 let i = j + lane;
                 if i == m_idx || i >= n_active {
                     continue;
@@ -1392,10 +1389,10 @@ impl ClusterSequence {
 
                 let cur_nn = nn_idx[i] as usize;
                 if cur_nn == swapped_idx || cur_nn == old_tail_idx {
-                    needs_rescan.push((i, d2_vals[lane]));
-                } else if d2_vals[lane] < nn_dist[i] {
+                    needs_rescan.push((i, *d2));
+                } else if *d2 < nn_dist[i] {
                     // if m is the lowest distance then no need to find N as other have not changed
-                    nn_dist[i] = d2_vals[lane];
+                    nn_dist[i] = *d2;
                     nn_idx[i] = m_idx as u64;
                     di_j[i] = nn_dist[i] * kt2[i].min(kt2[m_idx]);
                 }
@@ -1440,8 +1437,7 @@ impl ClusterSequence {
         for (idx, dist_to_m) in needs_rescan {
             ClusterSequence::set_nn_nocross_simd::<LANES>(
                 idx,
-                0,
-                n_active - 1,
+                0..n_active - 1,
                 rap,
                 phi,
                 self.r2,
@@ -1484,8 +1480,7 @@ impl ClusterSequence {
             if needs_recompute {
                 ClusterSequence::set_nn_nocross_simd::<LANES>(
                     i,
-                    0,
-                    n_active - 1,
+                    0..n_active - 1,
                     rap,
                     phi,
                     self.r2,
@@ -1928,7 +1923,7 @@ impl ClusterSequence {
         assert!(tail_idx <= len);
 
         // this part is immutable only change at the end
-        let jets_ref = &*jets;
+        let jets_ref = &jets;
         let curr_jet = &jets_ref[curr_idx];
 
         for jet_b_idx in head_idx..curr_idx {
