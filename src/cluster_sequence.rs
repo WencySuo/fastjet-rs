@@ -1,7 +1,5 @@
 use log::warn;
-use std::cell::RefCell;
 use std::panic;
-use std::rc::Rc;
 
 use crate::constants::PI;
 use crate::constants::TWO_PI;
@@ -114,7 +112,6 @@ pub enum Strategy {
     N2PlainEE,
 }
 
-// TODO: implement other algorithms
 #[derive(PartialEq, Eq)]
 pub enum Algorithm {
     AntiKt,
@@ -691,14 +688,15 @@ impl ClusterSequence {
 
     pub fn _tj_set_jetinfo(
         &mut self,
+        jets: &mut Vec<TiledJet>,
         tiled_jet: Option<TiledJet>,
         particle_index: usize,
-    ) -> Rc<RefCell<TiledJet>> {
-        let jet = if let Some(tj) = tiled_jet {
-            Rc::new(RefCell::new(tj))
+    ) -> usize {
+        let mut jet = if let Some(tj) = tiled_jet {
+            tj
         } else {
             let pseudo_jet = &self.particles[particle_index];
-            let new_tj = TiledJet::_bj_set_jetinfo(
+            TiledJet::_bj_set_jetinfo(
                 particle_index,
                 pseudo_jet,
                 self.r2,
@@ -708,50 +706,41 @@ impl ClusterSequence {
                     self.jetdef.extra_param,
                 ),
                 particle_index,
-            );
-            Rc::new(RefCell::new(new_tj))
+            )
         };
 
-        let (eta, phi) = {
-            let j = jet.borrow();
-            (j.eta(), j.phi())
-        };
+        let tile_index = self._tile_index(jet.eta(), jet.phi());
+        jet.tile_index = tile_index;
 
-        jet.borrow_mut().tile_index = self._tile_index(eta, phi);
-        let tile_index = jet.borrow().tile_index;
+        let old_head = self.tiles_struct._tiles[tile_index].head;
+        jet.prev_jet = None;
+        jet.next_jet = old_head;
 
-        // need to add jet pointer to linked List of jets
-        {
-            let mut j = jet.borrow_mut();
-            j.prev_jet = None;
-            j.next_jet = self.tiles_struct._tiles[tile_index].head.clone();
+        let new_jet_id = jets.len();
+        jets.push(jet);
+
+        if let Some(next) = old_head {
+            jets[next].prev_jet = Some(new_jet_id);
         }
 
-        if let Some(next) = self.tiles_struct._tiles[tile_index].head.as_ref() {
-            next.borrow_mut().prev_jet = Some(Rc::clone(&jet));
-        }
-
-        self.tiles_struct._tiles[tile_index].head = Some(Rc::clone(&jet));
-        jet
+        self.tiles_struct._tiles[tile_index].head = Some(new_jet_id);
+        new_jet_id
     }
 
-    pub fn bj_remove_from_tiles(&mut self, jet: &Rc<RefCell<TiledJet>>) {
-        let tile = &mut self.tiles_struct._tiles[jet.borrow().tile_index];
+    pub fn bj_remove_from_tiles(&mut self, jets: &mut Vec<TiledJet>, jet_idx: usize) {
+        let tile = &mut self.tiles_struct._tiles[jets[jet_idx].tile_index];
 
         // if prev is null then jet is head
-        // TODO: check if we really need to clone in both if lets
-        if let Some(ref prev) = jet.borrow().prev_jet {
+        if let Some(prev) = jets[jet_idx].prev_jet {
             // link prev pointer to next pointer to remove jet
-            prev.borrow_mut().next_jet = jet.borrow().next_jet.clone();
+            jets[prev].next_jet = jets[jet_idx].next_jet;
         } else {
-            tile.head = jet.borrow().next_jet.clone();
+            tile.head = jets[jet_idx].next_jet;
         }
 
-        if let Some(ref next) = jet.borrow().next_jet {
-            next.borrow_mut().prev_jet = jet.borrow().prev_jet.clone();
+        if let Some(next) = jets[jet_idx].next_jet {
+            jets[next].prev_jet = jets[jet_idx].prev_jet;
         }
-
-        //TODO check if we need to drop jet that we just added?
     }
 
     // add all neighbors indices around tile_index to tile_union
@@ -768,59 +757,64 @@ impl ClusterSequence {
         }
     }
 
-    pub fn update_pair_nn(jet_a: &Rc<RefCell<TiledJet>>, jet_b: &Rc<RefCell<TiledJet>>) {
-        let dist = {
-            let a = jet_a.borrow();
-            let b = jet_b.borrow();
-            TiledJet::_bj_dist(&a, &b)
-        };
+    fn two_mut<T>(v: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
+        assert!(a != b);
+        if a < b {
+            let (left, right) = v.split_at_mut(b);
+            (&mut left[a], &mut right[0])
+        } else {
+            let (left, right) = v.split_at_mut(a);
+            (&mut right[0], &mut left[b])
+        }
+    }
+
+    pub fn update_pair_nn(jet_a_idx: usize, jet_b_idx: usize, bj_jets: &mut [TiledJet]) {
+        let (jet_a, jet_b) = ClusterSequence::two_mut(bj_jets, jet_a_idx, jet_b_idx);
+        let dist = TiledJet::_bj_dist(&jet_a, &jet_b);
 
         let a_nn_dist = jet_a.nn_dist();
         let b_nn_dist = jet_b.nn_dist();
-        let a_idx = jet_a.borrow().bj_jet_index;
-        let b_idx = jet_b.borrow().bj_jet_index;
 
         if dist < a_nn_dist {
-            let mut a = jet_a.borrow_mut();
-            a.set_nn_dist(dist);
-            a.set_nn_jet(b_idx);
+            jet_a.set_nn_dist(dist);
+            jet_a.set_nn_jet(jet_b_idx);
         }
 
         if dist < b_nn_dist {
-            let mut b = jet_b.borrow_mut();
-            b.set_nn_dist(dist);
-            b.set_nn_jet(a_idx);
+            jet_b.set_nn_dist(dist);
+            jet_b.set_nn_jet(jet_a_idx);
         }
     }
 
     pub fn tiled_n2_cluster(&mut self) {
         self.initialize_tiles();
         let n = self.particles.len();
-        let mut bj_jets: Vec<Rc<RefCell<TiledJet>>> = Vec::with_capacity(n);
+        let mut active: Vec<usize> = Vec::with_capacity(n);
+        let mut bj_jets: Vec<TiledJet> = Vec::with_capacity(n); // stable arena
         let mut tile_union: Vec<usize> = vec![0; 3 * 9]; // giving vec length instead of just capacity
 
         // set bj info for all tiles
         for i in 0..n {
-            let tile_jet = self._tj_set_jetinfo(None, i);
-            tile_jet.borrow_mut().bj_jet_index = i;
-            bj_jets.push(tile_jet);
+            let tile_jet_idx = self._tj_set_jetinfo(&mut bj_jets, None, i);
+            bj_jets[tile_jet_idx].nn_jet_index = tile_jet_idx; // default nn is itself
+            active.push(tile_jet_idx);
         }
 
         // set up all NN info
         self.tiles_struct._tiles.iter().for_each(|tile| {
             // set bj_dist
-            let mut jet_a_next = tile.head.clone();
+            let mut jet_a_next_idx = tile.head.clone();
 
-            while let Some(jet_a) = jet_a_next {
-                let mut jet_b_next = tile.head.clone();
-                while let Some(jet_b) = jet_b_next {
-                    if Rc::ptr_eq(&jet_a, &jet_b) {
+            while let Some(jet_a_idx) = jet_a_next_idx {
+                let mut jet_b_next_idx = tile.head;
+                while let Some(jet_b_idx) = jet_b_next_idx {
+                    if jet_a_idx == jet_b_idx {
                         break;
                     }
-                    ClusterSequence::update_pair_nn(&jet_a, &jet_b);
-                    jet_b_next = jet_b.borrow().next_jet.clone();
+                    ClusterSequence::update_pair_nn(jet_a_idx, jet_b_idx, &mut bj_jets);
+                    jet_b_next_idx = bj_jets[jet_b_idx].next_jet;
                 }
-                jet_a_next = jet_a.borrow().next_jet.clone();
+                jet_a_next_idx = bj_jets[jet_a_idx].next_jet;
             }
             // now we need to do it for the RH tiles since a NN might lie there for this tile
             // we do not check the LH tiles since these should already be computed by the prev
@@ -829,15 +823,15 @@ impl ClusterSequence {
                 // rh tile should never be None
                 let rh_tile = &self.tiles_struct._tiles[tile.begin_tiles[rh_tile_idx]];
                 // do another loop over all tiles
-                let mut jet_a_next = tile.head.clone();
-                while let Some(jet_a) = jet_a_next {
+                let mut jet_a_next_idx = tile.head;
+                while let Some(jet_a_idx) = jet_a_next_idx {
                     // now we loop over all RH tile jets
-                    let mut jet_b_next = rh_tile.head.clone();
-                    while let Some(jet_b) = jet_b_next {
-                        ClusterSequence::update_pair_nn(&jet_a, &jet_b);
-                        jet_b_next = jet_b.borrow().next_jet.clone();
+                    let mut jet_b_next_idx = rh_tile.head;
+                    while let Some(jet_b_idx) = jet_b_next_idx {
+                        ClusterSequence::update_pair_nn(jet_a_idx, jet_b_idx, &mut bj_jets);
+                        jet_b_next_idx = bj_jets[jet_b_idx].next_jet;
                     }
-                    jet_a_next = jet_a.borrow().next_jet.clone();
+                    jet_a_next_idx = bj_jets[jet_a_idx].next_jet;
                 }
             }
         });
@@ -847,41 +841,39 @@ impl ClusterSequence {
         // just loop over all jets
         // TODO fix this goofy ProxyJet shenanigans
         let mut di_j: Vec<f64> = vec![0.0; n];
-        di_j.iter_mut().enumerate().for_each(|(i, jet)| {
-            *jet = <Rc<RefCell<TiledJet>> as ProxyJet>::_bj_dij(&bj_jets[i], &bj_jets);
-        });
+        for pos in 0..active.len() {
+            let id = active[pos];
+            di_j[pos] = TiledJet::_bj_dij(&bj_jets[id], &bj_jets);
+        }
 
         //start recombination loop
         for i in 0..n {
             let end_idx = n - 1 - i;
-            let mut min_idx = 0;
-            let mut min_dij = di_j[0];
-            for (k, jet) in di_j.iter().enumerate().take(end_idx + 1).skip(1) {
-                if *jet < min_dij {
-                    min_dij = *jet;
-                    min_idx = k;
-                }
-            }
+            let (min_idx, min_dij) = di_j[..=end_idx]
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, d)| d.to_bits())
+                .unwrap();
 
-            let jet_a = &bj_jets[min_idx];
-            let mut jet_b_idx = jet_a.nn_jet_index();
-
+            let jet_a_idx = active[min_idx];
+            let jet_a_tile_idx = bj_jets[jet_a_idx].tile_index;
+            let mut jet_b_idx = bj_jets[jet_a_idx].nn_jet_index;
             // normalize
             let min_dij = min_dij * self._invr2;
 
             // keep old pointer info after removing from tiles
-            let mut old_b_jet: Option<Rc<RefCell<TiledJet>>> = None;
+            let mut old_b_tile_idx: Option<usize> = None;
+            let mut old_b_jet_idx: Option<usize> = None;
+            let mut new_b_jet_idx: Option<usize> = None;
 
             //check if jet_a has neighbor
-            if jet_b_idx != min_idx {
-                if min_idx < jet_b_idx {
-                    std::mem::swap(&mut min_idx, &mut jet_b_idx);
-                }
+            if jet_b_idx != jet_a_idx {
+                let b_pos = active.iter().position(|&id| id == jet_b_idx).unwrap();
 
                 // nn is the new index we want to store the recombined index at
                 // modify jetB for BJ with new info
                 let new_bj = self.do_jet_jet_recombination_step::<TiledJet>(
-                    bj_jets[min_idx].particle_index(),
+                    bj_jets[jet_a_idx].particle_index(),
                     bj_jets[jet_b_idx].particle_index(),
                     min_dij,
                     jet_b_idx,
@@ -890,61 +882,54 @@ impl ClusterSequence {
                 // do jj now remove jetA from tiles
                 // and remove old jetB
                 // and add newly merged jetB
-                self.bj_remove_from_tiles(&bj_jets[min_idx]);
-                // apperantly need oldJetB pointer needs to be stored?
-                old_b_jet = Some(bj_jets[jet_b_idx].clone());
-                self.bj_remove_from_tiles(&bj_jets[jet_b_idx]);
+                self.bj_remove_from_tiles(&mut bj_jets, jet_a_idx);
+                old_b_tile_idx = Some(bj_jets[jet_b_idx].tile_index);
+                old_b_jet_idx = Some(jet_b_idx);
+                self.bj_remove_from_tiles(&mut bj_jets, jet_b_idx);
+                let part_idx = bj_jets[jet_b_idx].particle_index();
 
-                let new_bj_rc =
-                    self._tj_set_jetinfo(Some(new_bj), bj_jets[jet_b_idx].particle_index());
-                bj_jets[jet_b_idx] = new_bj_rc;
-                bj_jets[jet_b_idx].borrow_mut().bj_jet_index = jet_b_idx;
+                let new_bj_rc_idx = self._tj_set_jetinfo(&mut bj_jets, Some(new_bj), part_idx);
+                active[b_pos] = new_bj_rc_idx;
+                new_b_jet_idx = Some(new_bj_rc_idx);
+                jet_b_idx = new_bj_rc_idx;
             } else {
-                self.do_jet_beam_recombination_step(bj_jets[min_idx].particle_index(), min_dij);
-                self.bj_remove_from_tiles(&bj_jets[min_idx])
+                self.do_jet_beam_recombination_step(bj_jets[jet_a_idx].particle_index(), min_dij);
+                self.bj_remove_from_tiles(&mut bj_jets, jet_a_idx);
             };
 
             let mut n_near_tiles: usize = 0;
             // add neighbors to one search vector "tile_union"
-            self._add_neighbors_to_tile_union(
-                bj_jets[min_idx].borrow().tile_index,
-                &mut tile_union,
-                &mut n_near_tiles,
-            );
+            self._add_neighbors_to_tile_union(jet_a_tile_idx, &mut tile_union, &mut n_near_tiles);
 
-            if jet_b_idx != min_idx {
+            if let Some(new_b_idx) = new_b_jet_idx {
                 // if we add other neighbors then add flag
                 let mut need_sort = false;
                 // if same tile then ignore
-                if bj_jets[jet_b_idx].borrow().tile_index != bj_jets[min_idx].borrow().tile_index {
+                if bj_jets[new_b_idx].tile_index != jet_a_tile_idx {
                     need_sort = true;
                     self._add_neighbors_to_tile_union(
-                        bj_jets[jet_b_idx].borrow().tile_index,
+                        bj_jets[new_b_idx].tile_index,
                         &mut tile_union,
                         &mut n_near_tiles,
                     );
                 }
 
                 //check if old jet needs to be added too
-                if let Some(old_b_jet) = old_b_jet
-                    && old_b_jet.borrow().tile_index != bj_jets[jet_b_idx].borrow().tile_index
-                    && old_b_jet.borrow().tile_index != bj_jets[min_idx].borrow().tile_index
+                if let Some(old_b_tile) = old_b_tile_idx
+                    && old_b_tile != bj_jets[new_b_idx].tile_index
+                    && old_b_tile != jet_a_tile_idx
                 {
                     need_sort = true;
                     self._add_neighbors_to_tile_union(
-                        old_b_jet.borrow().tile_index,
+                        old_b_tile,
                         &mut tile_union,
                         &mut n_near_tiles,
                     );
                 }
 
                 if need_sort {
-                    // sort tiles up to n_near tiles just take a slice
-                    // inplace?
                     let _ = &mut tile_union[0..n_near_tiles].sort();
-
                     //take sorted list and now compress repeated tiles
-                    // by doing On^2 search for duplicates
                     let mut compressed_idx = 1;
                     for idx in 1..n_near_tiles {
                         if tile_union[idx] != tile_union[compressed_idx - 1] {
@@ -956,97 +941,89 @@ impl ClusterSequence {
                 }
             }
 
-            // now we update the nn neighbor info and move old jet
             //moves recombined min_idx with potential new NN jet at end_idx
-            //copy tail values to jetA
             if min_idx != end_idx {
-                bj_jets.swap(min_idx, end_idx);
+                active.swap(min_idx, end_idx);
                 di_j.swap(min_idx, end_idx);
-
-                bj_jets[min_idx].borrow_mut().bj_jet_index = min_idx;
-                bj_jets[end_idx].borrow_mut().bj_jet_index = end_idx;
-
-                // check entire list and update NN of references to new jet
-                // very slow O(n) each time, compared to implicit pointer copying in C++
-                // TODO: refactor this logic so that no longer O(n) update since that defeats the purpose of tiling.
-                for jet in bj_jets.iter_mut().take(end_idx) {
-                    if jet.nn_jet_index() == end_idx {
-                        jet.set_nn_jet(min_idx);
-                    }
-                }
             }
+            active.pop();
+            di_j.pop();
 
             // now update new jetB NN by using tile union
             for &tile_union_neighbor in tile_union.iter().take(n_near_tiles) {
                 // let tile = &self.tiles_struct._tiles[tile_union[tile_union_neighbor]];
                 let tile = &self.tiles_struct._tiles[tile_union_neighbor];
-                let mut jet_i_next = tile.head.clone();
+                let mut jet_i_next_idx = tile.head;
 
-                while let Some(jet_i) = jet_i_next {
+                while let Some(jet_i_idx) = jet_i_next_idx {
                     // if jet_i had NN of jetA or jetB need to recalculate
-                    //let mut jet_b_next = tile.head.clone();
-                    if jet_i.borrow().nn_jet_index == min_idx
-                        || jet_b_idx != min_idx && jet_i.borrow().nn_jet_index == jet_b_idx
+                    if bj_jets[jet_i_idx].nn_jet_index == jet_a_idx
+                        || old_b_jet_idx
+                            .is_some_and(|old_b_id| bj_jets[jet_i_idx].nn_jet_index == old_b_id)
                     {
-                        jet_i.borrow_mut().nn_dist = self.r2;
-                        jet_i.borrow_mut().nn_jet_index = 0;
+                        bj_jets[jet_i_idx].nn_dist = self.r2;
+                        bj_jets[jet_i_idx].nn_jet_index = jet_i_idx;
                         // now find new NN in all tiles
                         for near_tile_idx in &tile.begin_tiles[0..tile.begin_len] {
                             // now go through bj over all jets in each tile
-                            let mut jet_j_next =
-                                self.tiles_struct._tiles[*near_tile_idx].head.clone();
-                            while let Some(jet_j) = jet_j_next {
-                                let dist = TiledJet::_bj_dist(&jet_i.borrow(), &jet_j.borrow());
-                                if dist < jet_i.nn_dist() && !Rc::ptr_eq(&jet_i, &jet_j) {
-                                    jet_i.borrow_mut().nn_dist = dist;
-                                    jet_i.borrow_mut().nn_jet_index = jet_j.borrow().bj_jet_index;
+                            let mut jet_j_next_idx = self.tiles_struct._tiles[*near_tile_idx].head;
+                            while let Some(jet_j_idx) = jet_j_next_idx {
+                                let dist =
+                                    TiledJet::_bj_dist(&bj_jets[jet_i_idx], &bj_jets[jet_j_idx]);
+                                if dist < bj_jets[jet_i_idx].nn_dist() && jet_i_idx != jet_j_idx {
+                                    bj_jets[jet_i_idx].nn_dist = dist;
+                                    bj_jets[jet_i_idx].nn_jet_index = jet_j_idx;
                                 }
-                                jet_j_next = jet_j.borrow().next_jet.clone();
+                                jet_j_next_idx = bj_jets[jet_j_idx].next_jet;
                             }
                         }
-                        di_j[jet_i.borrow().bj_jet_index] =
-                            <Rc<RefCell<TiledJet>> as ProxyJet>::_bj_dij(&jet_i, &bj_jets);
+                        if let Some(pos) = active.iter().position(|&id| id == jet_i_idx) {
+                            di_j[pos] =
+                                <TiledJet as ProxyJet>::_bj_dij(&bj_jets[jet_i_idx], &bj_jets);
+                        }
                     }
                     // if JJ recomb check if new jet is closer than jeti's current NN
-                    if jet_b_idx != min_idx {
-                        let dist =
-                            TiledJet::_bj_dist(&jet_i.borrow(), &bj_jets[jet_b_idx].borrow());
-                        if dist < jet_i.borrow().nn_dist && !Rc::ptr_eq(&jet_i, &bj_jets[jet_b_idx])
-                        {
-                            jet_i.borrow_mut().nn_dist = dist;
-                            jet_i.borrow_mut().nn_jet_index = jet_b_idx;
-                            di_j[jet_i.borrow().bj_jet_index] =
-                                <Rc<RefCell<TiledJet>> as ProxyJet>::_bj_dij(&jet_i, &bj_jets); // update diJ...
+                    if let Some(new_b_idx) = new_b_jet_idx {
+                        let dist = TiledJet::_bj_dist(&bj_jets[jet_i_idx], &bj_jets[jet_b_idx]);
+                        if dist < bj_jets[jet_i_idx].nn_dist && jet_i_idx != new_b_idx {
+                            bj_jets[jet_i_idx].nn_dist = dist;
+                            bj_jets[jet_i_idx].nn_jet_index = jet_b_idx;
+                            if let Some(pos) = active.iter().position(|&id| id == jet_i_idx) {
+                                di_j[pos] =
+                                    <TiledJet as ProxyJet>::_bj_dij(&bj_jets[jet_i_idx], &bj_jets);
+                            }
                         }
-                        if dist < bj_jets[jet_b_idx].borrow().nn_dist
-                            && !Rc::ptr_eq(&jet_i, &bj_jets[jet_b_idx])
-                        {
-                            bj_jets[jet_b_idx].borrow_mut().nn_dist = dist;
-                            let i_idx = jet_i.borrow().bj_jet_index;
-                            bj_jets[jet_b_idx].borrow_mut().nn_jet_index = i_idx;
+                        if dist < bj_jets[new_b_idx].nn_dist && jet_i_idx != new_b_idx {
+                            bj_jets[new_b_idx].nn_dist = dist;
+                            bj_jets[new_b_idx].nn_jet_index = jet_i_idx;
                         }
                     }
-                    jet_i_next = jet_i.borrow().next_jet.clone();
+                    jet_i_next_idx = bj_jets[jet_i_idx].next_jet;
                 }
             }
 
             // update diJ for our new jetB
-            if jet_b_idx != min_idx {
-                di_j[jet_b_idx] =
-                    <Rc<RefCell<TiledJet>> as ProxyJet>::_bj_dij(&bj_jets[jet_b_idx], &bj_jets);
-            }
+            // if jet_b_idx != min_idx {
+            //     di_j[jet_b_idx] = TiledJet::_bj_dij(&bj_jets[jet_b_idx], &bj_jets);
+            // }
 
-            // update all pointers of old tail tiles
-            let tiles = &self.tiles_struct._tiles[bj_jets[end_idx].borrow().tile_index];
-            for near_tiled_idx in &tiles.begin_tiles[0..tiles.begin_len] {
-                let near_tile = &self.tiles_struct._tiles[*near_tiled_idx];
-                let mut jet_j_next = near_tile.head.clone();
-                while let Some(jet_j) = jet_j_next {
-                    if jet_j.borrow().nn_jet_index == 0 {
-                        jet_j.borrow_mut().nn_jet_index = 0;
-                    }
-                    jet_j_next = jet_j.borrow().next_jet.clone();
-                }
+            // // update all pointers of old tail tiles
+            // let tiles = &self.tiles_struct._tiles[bj_jets[end_idx].tile_index];
+            // for near_tiled_idx in &tiles.begin_tiles[0..tiles.begin_len] {
+            //     let near_tile = &self.tiles_struct._tiles[*near_tiled_idx];
+            //     let mut jet_j_next_idx = near_tile.head;
+            //     while let Some(jet_j_idx) = jet_j_next_idx {
+            //         if bj_jets[jet_j_idx].nn_jet_index == 0 {
+            //             bj_jets[jet_j_idx].nn_jet_index = 0;
+            //         }
+            //         jet_j_next_idx = bj_jets[jet_j_idx].next_jet;
+            //     }
+            // }
+
+            if let Some(new_b_idx) = new_b_jet_idx
+                && let Some(pos) = active.iter().position(|&id| id == new_b_idx)
+            {
+                di_j[pos] = TiledJet::_bj_dij(&bj_jets[new_b_idx], &bj_jets);
             }
         }
     }

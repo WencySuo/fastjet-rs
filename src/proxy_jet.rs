@@ -23,29 +23,18 @@ pub struct EEBriefJet {
     pub nz: f64,
 }
 
-// pub struct TiledJet {
-//     eta: f64,
-//     phi: f64,
-//     kt2: f64,
-//     nn_dist: Option<f64>,// either nn_dist == option, or only read dist if nn_jet != None
-//     nn_jet: Option<PseudoJet>,
-//     index: Option<usize>, // either index == option, or only read index if nn_jet != None
-// } //include linked lists for NN dist
-
-//empty struct for now
+// version without rc refcell
 #[derive(Default)]
 pub struct TiledJet {
     pub eta: f64,
     pub phi: f64,
     pub kt2: f64,
-    pub nn_dist: f64, // either nn_dist == option, or only read dist if nn_jet != None
-    pub nn_jet_index: usize, //TODO: investigate if box is best way to do this
-    pub particle_index: usize, // either index == option, or only read index if nn_jet != None
-    pub bj_jet_index: usize,
+    pub nn_dist: f64,
+    pub nn_jet_index: usize, // if no nn then nn index is self
+    pub particle_index: usize,
     pub tile_index: usize,
-    //Pointers to other jets
-    pub prev_jet: Option<Rc<RefCell<TiledJet>>>,
-    pub next_jet: Option<Rc<RefCell<TiledJet>>>,
+    pub prev_jet: Option<usize>,
+    pub next_jet: Option<usize>,
 }
 
 #[derive(Clone, Default)]
@@ -53,7 +42,7 @@ pub struct Tile {
     pub begin_tiles: [usize; 9],
     pub begin_len: usize,
     pub rh_tiles: std::ops::Range<usize>,
-    pub head: Option<Rc<RefCell<TiledJet>>>, // need rc to make linked lists of jets
+    pub head: Option<usize>,
 }
 
 impl Tile {
@@ -66,17 +55,6 @@ impl Tile {
         }
     }
 }
-
-// impl TiledJet {
-//     pub fn eta(&self) -> f64 {
-//         self.eta
-//     }
-
-//     #[inline]
-//     pub fn phi(&self) -> f64 {
-//         self.phi
-//     }
-// }
 
 impl ProxyJet for TiledJet {
     #[inline]
@@ -144,7 +122,6 @@ impl ProxyJet for TiledJet {
             nn_jet_index: nn_jet_idx,
             // at init paritlc_index and bj_jet_index should be the same
             particle_index: index,
-            bj_jet_index: index,
             tile_index: 0, // default value
             prev_jet: None,
             next_jet: None,
