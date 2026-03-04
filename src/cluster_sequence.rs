@@ -1,6 +1,7 @@
 use log::warn;
 use std::panic;
 
+use crate::constants::INACTIVE;
 use crate::constants::PI;
 use crate::constants::TWO_PI;
 
@@ -743,20 +744,6 @@ impl ClusterSequence {
         }
     }
 
-    // add all neighbors indices around tile_index to tile_union
-    pub fn _add_neighbors_to_tile_union(
-        &self,
-        tile_index: usize,
-        tile_union: &mut [usize],
-        n_near_tiles: &mut usize, // make sure we're passing in an indexable index for union (since capped at 27)
-    ) {
-        let tile = &self.tiles_struct._tiles[tile_index];
-        for near_tile_idx in &tile.begin_tiles[0..tile.begin_len] {
-            tile_union[*n_near_tiles] = *near_tile_idx;
-            *n_near_tiles += 1;
-        }
-    }
-
     fn two_mut<T>(v: &mut [T], a: usize, b: usize) -> (&mut T, &mut T) {
         assert!(a != b);
         if a < b {
@@ -790,13 +777,18 @@ impl ClusterSequence {
         self.initialize_tiles();
         let n = self.particles.len();
         let mut active: Vec<usize> = Vec::with_capacity(n);
-        let mut bj_jets: Vec<TiledJet> = Vec::with_capacity(n); // stable arena
+        let n_tiles = self.tiles_struct._tiles.len();
+        let mut seen_stamp: Vec<u32> = vec![0; n_tiles];
+        let mut stamp: u32 = 1;
+        let mut active_pos = vec![INACTIVE; 2 * n];
+        let mut bj_jets: Vec<TiledJet> = Vec::with_capacity(2 * n); // stable arena
         let mut tile_union: Vec<usize> = vec![0; 3 * 9]; // giving vec length instead of just capacity
 
         // set bj info for all tiles
         for i in 0..n {
             let tile_jet_idx = self._tj_set_jetinfo(&mut bj_jets, None, i);
             bj_jets[tile_jet_idx].nn_jet_index = tile_jet_idx; // default nn is itself
+            active_pos[i] = active.len();
             active.push(tile_jet_idx);
         }
 
@@ -868,7 +860,7 @@ impl ClusterSequence {
 
             //check if jet_a has neighbor
             if jet_b_idx != jet_a_idx {
-                let b_pos = active.iter().position(|&id| id == jet_b_idx).unwrap();
+                let b_pos = active_pos[jet_b_idx]; // eliminated O(n) check
 
                 // nn is the new index we want to store the recombined index at
                 // modify jetB for BJ with new info
@@ -890,6 +882,8 @@ impl ClusterSequence {
 
                 let new_bj_rc_idx = self._tj_set_jetinfo(&mut bj_jets, Some(new_bj), part_idx);
                 active[b_pos] = new_bj_rc_idx;
+                active_pos[new_bj_rc_idx] = b_pos;
+                active_pos[jet_b_idx] = INACTIVE;
                 new_b_jet_idx = Some(new_bj_rc_idx);
                 jet_b_idx = new_bj_rc_idx;
             } else {
@@ -898,59 +892,48 @@ impl ClusterSequence {
             };
 
             let mut n_near_tiles: usize = 0;
-            // add neighbors to one search vector "tile_union"
-            self._add_neighbors_to_tile_union(jet_a_tile_idx, &mut tile_union, &mut n_near_tiles);
 
-            if let Some(new_b_idx) = new_b_jet_idx {
-                // if we add other neighbors then add flag
-                let mut need_sort = false;
-                // if same tile then ignore
-                if bj_jets[new_b_idx].tile_index != jet_a_tile_idx {
-                    need_sort = true;
-                    self._add_neighbors_to_tile_union(
-                        bj_jets[new_b_idx].tile_index,
-                        &mut tile_union,
-                        &mut n_near_tiles,
-                    );
-                }
+            if stamp == u32::MAX {
+                seen_stamp.fill(0);
+                stamp = 1;
+            }
+            let cur_stamp = stamp;
+            stamp += 1;
 
-                //check if old jet needs to be added too
-                if let Some(old_b_tile) = old_b_tile_idx
-                    && old_b_tile != bj_jets[new_b_idx].tile_index
-                    && old_b_tile != jet_a_tile_idx
-                {
-                    need_sort = true;
-                    self._add_neighbors_to_tile_union(
-                        old_b_tile,
-                        &mut tile_union,
-                        &mut n_near_tiles,
-                    );
-                }
-
-                if need_sort {
-                    let _ = &mut tile_union[0..n_near_tiles].sort();
-                    //take sorted list and now compress repeated tiles
-                    let mut compressed_idx = 1;
-                    for idx in 1..n_near_tiles {
-                        if tile_union[idx] != tile_union[compressed_idx - 1] {
-                            tile_union[compressed_idx] = tile_union[idx];
-                            compressed_idx += 1;
-                        }
+            // helper
+            let mut add_neighbors_unique = |tile_index: usize| {
+                let tile = &self.tiles_struct._tiles[tile_index];
+                for &near_tile_idx in &tile.begin_tiles[..tile.begin_len] {
+                    if seen_stamp[near_tile_idx] != cur_stamp {
+                        seen_stamp[near_tile_idx] = cur_stamp;
+                        tile_union[n_near_tiles] = near_tile_idx;
+                        n_near_tiles += 1;
                     }
-                    n_near_tiles = compressed_idx;
                 }
+            };
+
+            add_neighbors_unique(jet_a_tile_idx);
+            if let Some(new_b_idx) = new_b_jet_idx {
+                add_neighbors_unique(bj_jets[new_b_idx].tile_index);
+            }
+            if let Some(old_b_tile) = old_b_tile_idx {
+                add_neighbors_unique(old_b_tile);
             }
 
             //moves recombined min_idx with potential new NN jet at end_idx
             if min_idx != end_idx {
                 active.swap(min_idx, end_idx);
                 di_j.swap(min_idx, end_idx);
+                active_pos[active[min_idx]] = min_idx;
+                active_pos[active[end_idx]] = end_idx;
             }
+            let removed = active[end_idx];
+            active_pos[removed] = INACTIVE;
             active.pop();
             di_j.pop();
 
             // now update new jetB NN by using tile union
-            for &tile_union_neighbor in tile_union.iter().take(n_near_tiles) {
+            for &tile_union_neighbor in tile_union[..n_near_tiles].iter() {
                 // let tile = &self.tiles_struct._tiles[tile_union[tile_union_neighbor]];
                 let tile = &self.tiles_struct._tiles[tile_union_neighbor];
                 let mut jet_i_next_idx = tile.head;
@@ -977,7 +960,8 @@ impl ClusterSequence {
                                 jet_j_next_idx = bj_jets[jet_j_idx].next_jet;
                             }
                         }
-                        if let Some(pos) = active.iter().position(|&id| id == jet_i_idx) {
+                        let pos = active_pos[jet_i_idx];
+                        if pos != INACTIVE {
                             di_j[pos] =
                                 <TiledJet as ProxyJet>::_bj_dij(&bj_jets[jet_i_idx], &bj_jets);
                         }
@@ -988,7 +972,8 @@ impl ClusterSequence {
                         if dist < bj_jets[jet_i_idx].nn_dist && jet_i_idx != new_b_idx {
                             bj_jets[jet_i_idx].nn_dist = dist;
                             bj_jets[jet_i_idx].nn_jet_index = jet_b_idx;
-                            if let Some(pos) = active.iter().position(|&id| id == jet_i_idx) {
+                            let pos = active_pos[jet_i_idx];
+                            if pos != INACTIVE {
                                 di_j[pos] =
                                     <TiledJet as ProxyJet>::_bj_dij(&bj_jets[jet_i_idx], &bj_jets);
                             }
@@ -1003,27 +988,11 @@ impl ClusterSequence {
             }
 
             // update diJ for our new jetB
-            // if jet_b_idx != min_idx {
-            //     di_j[jet_b_idx] = TiledJet::_bj_dij(&bj_jets[jet_b_idx], &bj_jets);
-            // }
-
-            // // update all pointers of old tail tiles
-            // let tiles = &self.tiles_struct._tiles[bj_jets[end_idx].tile_index];
-            // for near_tiled_idx in &tiles.begin_tiles[0..tiles.begin_len] {
-            //     let near_tile = &self.tiles_struct._tiles[*near_tiled_idx];
-            //     let mut jet_j_next_idx = near_tile.head;
-            //     while let Some(jet_j_idx) = jet_j_next_idx {
-            //         if bj_jets[jet_j_idx].nn_jet_index == 0 {
-            //             bj_jets[jet_j_idx].nn_jet_index = 0;
-            //         }
-            //         jet_j_next_idx = bj_jets[jet_j_idx].next_jet;
-            //     }
-            // }
-
-            if let Some(new_b_idx) = new_b_jet_idx
-                && let Some(pos) = active.iter().position(|&id| id == new_b_idx)
-            {
-                di_j[pos] = TiledJet::_bj_dij(&bj_jets[new_b_idx], &bj_jets);
+            if let Some(new_b_idx) = new_b_jet_idx {
+                let pos = active_pos[new_b_idx];
+                if pos != INACTIVE {
+                    di_j[pos] = <TiledJet as ProxyJet>::_bj_dij(&bj_jets[new_b_idx], &bj_jets);
+                }
             }
         }
     }
