@@ -5,7 +5,6 @@ use crate::constants::INACTIVE;
 use crate::constants::PI;
 use crate::constants::TWO_PI;
 
-#[cfg(not(feature = "simd"))]
 use crate::proxy_jet::BriefJet;
 use crate::proxy_jet::EEBriefJet;
 use crate::proxy_jet::ProxyJet;
@@ -105,12 +104,14 @@ pub struct JetDefinition {
     pub extra_param: Option<f64>,
 }
 
+#[derive(Clone, Copy)]
 pub enum Strategy {
     Best,
     N2Plain,
     N2Tiling,
     N2PlainEEAccurate,
     N2PlainEE,
+    N2Simd,
 }
 
 #[derive(PartialEq, Eq)]
@@ -285,11 +286,13 @@ impl ClusterSequence {
             Strategy::N2Plain => {
                 //TODO: simd can only be used with BriefJets that are not EE
                 // explicitly include these checks in the future
+                // #[cfg(feature = "simd")]
+                // self.simple_n2_cluster_simd();
+                self.simple_n2_cluster::<BriefJet>();
+            }
+            Strategy::N2Simd => {
                 #[cfg(feature = "simd")]
                 self.simple_n2_cluster_simd();
-
-                #[cfg(not(feature = "simd"))]
-                self.simple_n2_cluster::<BriefJet>();
             }
             Strategy::N2Tiling => {
                 self.tiled_n2_cluster();
