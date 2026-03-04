@@ -788,10 +788,10 @@ impl ClusterSequence {
         let mut tile_union: Vec<usize> = vec![0; 3 * 9]; // giving vec length instead of just capacity
 
         // set bj info for all tiles
-        for i in 0..n {
+        for (i, active_pos_elem) in active_pos.iter_mut().enumerate().take(n) {
             let tile_jet_idx = self._tj_set_jetinfo(&mut bj_jets, None, i);
             bj_jets[tile_jet_idx].nn_jet_index = tile_jet_idx; // default nn is itself
-            active_pos[i] = active.len();
+            *active_pos_elem = active.len();
             active.push(tile_jet_idx);
         }
 
