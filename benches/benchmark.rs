@@ -68,6 +68,7 @@ fn run_clustering(event: &String, strategy: Strategy) {
 }
 
 fn example_bench(c: &mut Criterion) {
+    #[cfg(feature = "simd")]
     c.bench_function("example_01_simd", |b| {
         b.iter(|| {
             let file = File::open("./examples/data/single-event.dat").unwrap();
@@ -361,8 +362,8 @@ fn bootstrap_bench(c: &mut Criterion) {
         group_simple.throughput(criterion::Throughput::Elements(
             count_exact_newlines(event) as u64
         ));
-        group_simple.measurement_time(Duration::from_secs(30));
-        group_simple.sample_size(500);
+        group_simple.measurement_time(Duration::from_secs(60));
+        group_simple.sample_size(250);
         group_simple.bench_with_input(
             BenchmarkId::from_parameter(count_exact_newlines(event) as u64),
             event,
@@ -372,15 +373,18 @@ fn bootstrap_bench(c: &mut Criterion) {
 
     group_simple.finish();
 
+    // only include SIMD if the user has the feature installed
+    #[cfg(feature = "simd")]
     let mut group_simd = c.benchmark_group("N2_Cluster_SIMD");
 
+    #[cfg(feature = "simd")]
     for event in &events {
         let strategy = Strategy::N2Simd;
         group_simd.throughput(criterion::Throughput::Elements(
             count_exact_newlines(event) as u64
         ));
-        group_simd.measurement_time(Duration::from_secs(30));
-        group_simd.sample_size(500);
+        group_simd.measurement_time(Duration::from_secs(60));
+        group_simd.sample_size(250);
         group_simd.bench_with_input(
             BenchmarkId::from_parameter(count_exact_newlines(event) as u64),
             event,
@@ -388,6 +392,7 @@ fn bootstrap_bench(c: &mut Criterion) {
         );
     }
 
+    #[cfg(feature = "simd")]
     group_simd.finish();
 
     let mut group_tiled = c.benchmark_group("Tiled_N2_Cluster");
@@ -397,8 +402,8 @@ fn bootstrap_bench(c: &mut Criterion) {
         group_tiled.throughput(criterion::Throughput::Elements(
             count_exact_newlines(event) as u64
         ));
-        group_tiled.measurement_time(Duration::from_secs(30));
-        group_tiled.sample_size(500);
+        group_tiled.measurement_time(Duration::from_secs(60));
+        group_tiled.sample_size(250);
         group_tiled.bench_with_input(
             BenchmarkId::from_parameter(count_exact_newlines(event) as u64),
             event,
@@ -507,5 +512,5 @@ fn bootstrap_bench(c: &mut Criterion) {
     // });
 }
 
-criterion_group!(benches, example_bench);
+criterion_group!(benches, bootstrap_bench, example_bench);
 criterion_main!(benches);
